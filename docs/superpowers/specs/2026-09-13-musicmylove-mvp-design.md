@@ -29,10 +29,11 @@ Each seed list is independently normalized with rank percentile and max-score sc
 
 1. five normalized similarities sorted descending;
 2. five reciprocal-rank contributions sorted descending;
-3. support count divided by five;
-4. maximum and second-highest normalized similarity;
-5. mean and population standard deviation of positive similarities;
-6. same-artist seed count divided by five.
+3. total reciprocal-rank evidence;
+4. support count divided by five;
+5. maximum and second-highest normalized similarity;
+6. mean and population standard deviation of positive similarities;
+7. same-artist seed count divided by five.
 
 Candidates are deduplicated by recording MBID, and seeds are removed before scoring. Baselines are max normalized similarity and RRF. The neural scorer exactly reproduces the exported ReLU MLP. A validation-selected ranker name in the model artifact controls production honestly; ties fall back to recording MBID for deterministic output. Final selection greedily keeps ranked tracks while allowing at most two per normalized artist name.
 

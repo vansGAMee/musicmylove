@@ -34,7 +34,7 @@
 
 - [ ] Write tests covering merge/dedup, seed exclusion, independent score/rank normalization, exact 17-feature construction, deterministic ties, and two-per-artist diversity.
 - [ ] Run `npm test -- tests/unit/ranking.test.ts` and confirm failure because ranking modules do not exist.
-- [ ] Implement immutable types, per-list max-score and reciprocal-rank normalization, sorted order-independent feature construction, max/RRF scorers, stable sorting, explanations, and greedy diversity.
+- [ ] Implement immutable types, per-list max-score and reciprocal-rank normalization, sorted order-independent 17-value feature construction (including total RRF evidence), max/RRF scorers, stable sorting, explanations, and greedy diversity.
 - [ ] Run the focused test and `npm run typecheck`; confirm both pass.
 - [ ] Commit with `feat: add deterministic recommendation core`.
 
