@@ -10,4 +10,5 @@ __pycache__/
 data/cache/
 data/downloads/
 *.pyc
+*.tsbuildinfo
 .DS_Store
