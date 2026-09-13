@@ -23,3 +23,8 @@ test("rejects a feature width mismatch", () => {
 test("rejects an invalid ensemble coefficient", () => {
   expect(() => validateModel({ ...artifact, production_ranker: "ensemble", ensemble_alpha: 1.2 })).toThrow(/ensemble/i);
 });
+
+test("adds an optional residual feature to the neural output", () => {
+  expect(forward([3, 1], { ...artifact, residual_feature: 1 })).toBe(5.5);
+  expect(forward([3, 1], { ...artifact, residual_feature: 1, residual_scale: 0.5 })).toBe(3.25);
+});

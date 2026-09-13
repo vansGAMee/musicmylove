@@ -14,7 +14,8 @@ def artifact_score(features, artifact):
         values = [sum(weight * value for weight, value in zip(row, values)) + bias for row, bias in zip(layer["weight"], layer["bias"])]
         if index < len(artifact["layers"]) - 1:
             values = [max(0.0, value) for value in values]
-    return values[0]
+    residual = features[artifact["residual_feature"]] if artifact.get("residual_feature") is not None else 0.0
+    return artifact.get("residual_scale", 1.0) * values[0] + residual
 
 
 def main():

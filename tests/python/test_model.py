@@ -30,3 +30,9 @@ def test_exported_weights_load_back_into_real_pytorch(tmp_path: Path):
     export_model(model, output, [f"f{i}" for i in range(17)], "neural")
     loaded, _ = load_model(output, dtype=torch.float64)
     assert torch.max(torch.abs(model(vector) - loaded(vector))).item() < 1e-12
+
+
+def test_zero_initialized_residual_ranker_starts_exactly_at_rrf():
+    model = TinyRanker(17, residual_feature=10)
+    vector = torch.linspace(0, 1, 17)
+    assert model(vector).item() == vector[10].item()

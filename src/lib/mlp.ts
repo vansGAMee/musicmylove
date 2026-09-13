@@ -5,6 +5,8 @@ export interface ModelArtifact {
   activation: "relu";
   production_ranker: "max" | "rrf" | "neural" | "ensemble";
   ensemble_alpha?: number | null;
+  residual_feature?: number | null;
+  residual_scale?: number | null;
   layers: DenseLayer[];
 }
 
@@ -13,6 +15,7 @@ export function validateModel(model: ModelArtifact): void {
     throw new Error("Ensemble coefficient must be between zero and one");
   }
   if (!model.layers.length || !model.feature_names.length) throw new Error("Model has no layers or features");
+  if (model.residual_feature != null && (!Number.isInteger(model.residual_feature) || model.residual_feature < 0 || model.residual_feature >= model.feature_names.length)) throw new Error("Residual feature index is invalid");
   let width = model.feature_names.length;
   for (const layer of model.layers) {
     if (layer.weight.length !== layer.bias.length || layer.weight.some((row) => row.length !== width)) {
@@ -33,5 +36,5 @@ export function forward(features: readonly number[], model: ModelArtifact): numb
     );
     if (layerIndex < model.layers.length - 1) values = values.map((value) => Math.max(0, value));
   });
-  return values[0];
+  return model.residual_feature == null ? values[0] : features[model.residual_feature] + (model.residual_scale ?? 1) * values[0];
 }

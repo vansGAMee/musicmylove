@@ -36,7 +36,7 @@ def load_partition(root: Path, splits: dict, partition: str):
 
 def train_trial(positive, negative, weights, validation_evaluations, seed: int, learning_rate: float):
     random.seed(seed); torch.manual_seed(seed)
-    model = TinyRanker(17)
+    model = TinyRanker(17, residual_feature=10)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     best_state = copy.deepcopy(model.state_dict())
     best_ndcg, best_epoch, stale = -1.0, 0, 0
@@ -63,10 +63,17 @@ def train_trial(positive, negative, weights, validation_evaluations, seed: int, 
             if stale >= 8:
                 break
     model.load_state_dict(best_state); model.eval()
-    with torch.no_grad():
-        validation = evaluate_rankers(validation_evaluations, lambda values: model(torch.tensor(values, dtype=torch.float32)).item())
+    scaled = []
+    for residual_scale in (0.5, 0.75, 1.0, 1.25):
+        model.residual_scale = residual_scale
+        with torch.no_grad():
+            validation = evaluate_rankers(validation_evaluations, lambda values: model(torch.tensor(values, dtype=torch.float32)).item())
+        learned_ndcg = max(value["ndcg_at_20"] for name, value in validation.items() if name == "neural" or name.startswith("ensemble_"))
+        scaled.append((learned_ndcg, residual_scale, validation))
+    selection_ndcg, residual_scale, validation = max(scaled, key=lambda item: (item[0], -item[1]))
+    model.residual_scale = residual_scale
     ranker, alpha = choose_production_ranker(validation)
-    return model, validation, ranker, alpha, {"seed": seed, "learning_rate": learning_rate, "best_epoch": best_epoch, "best_learned_ndcg": best_ndcg, "selected_ranker": ranker, "ensemble_alpha": alpha, "history": history}
+    return model, validation, ranker, alpha, {"seed": seed, "learning_rate": learning_rate, "best_epoch": best_epoch, "best_learned_ndcg": selection_ndcg, "residual_scale": residual_scale, "selected_ranker": ranker, "ensemble_alpha": alpha, "history": history}
 
 
 def main():
