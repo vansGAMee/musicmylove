@@ -9,6 +9,18 @@ def create_user_splits(usernames: list[str], seed: int = 41) -> dict[str, list[s
     return {"train": sorted(ordered[:train_end]), "validation": sorted(ordered[train_end:validation_end]), "test": sorted(ordered[validation_end:])}
 
 
+def combine_sequential_experiment(first: dict[str, list[str]], second: dict[str, list[str]]) -> dict[str, list[str]]:
+    first_users = set(first["train"] + first["validation"] + first["test"])
+    second_users = set(second["train"] + second["validation"] + second["test"])
+    if first_users & second_users:
+        raise ValueError("sequential cohorts overlap")
+    return {
+        "train": sorted(first_users | set(second["train"])),
+        "validation": sorted(second["validation"]),
+        "test": sorted(second["test"]),
+    }
+
+
 def make_pairs(seeds: list[str], target: str, known_positives: set[str], candidates: list[str]) -> list[tuple[str, str]]:
     if target in seeds:
         raise ValueError("hidden target must not appear among seeds")

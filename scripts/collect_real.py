@@ -23,9 +23,11 @@ def main():
     parser.add_argument("--max-users", type=int, default=400)
     parser.add_argument("--retrieval-source", choices=["listenbrainz", "mlhd"], default="listenbrainz")
     parser.add_argument("--partitions", nargs="+", choices=["train", "validation", "test"], default=["train", "validation", "test"])
+    parser.add_argument("--manifest", default="data/manifests/usernames.json")
+    parser.add_argument("--split", default="data/manifests/real-splits.json")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    manifest = json.loads((root / "data/manifests/usernames.json").read_text())
+    manifest = json.loads((root / args.manifest).read_text())
     client = ApiClient()
     profile_dir = root / "data/cache/real-profiles"
     usable = []
@@ -39,9 +41,10 @@ def main():
         except PermanentApiError as error:
             print(f"profile_error index={index} type={type(error).__name__}", flush=True)
         if index % 25 == 0:
-            print(f"profiles={index}/500 usable={len(usable)}", flush=True)
+            print(f"profiles={index}/{len(manifest['usernames'])} usable={len(usable)}", flush=True)
     usable = usable[:args.max_users]
-    split_path = root / "data/manifests/real-splits.json"
+    split_path = root / args.split
+    split_path.parent.mkdir(parents=True, exist_ok=True)
     if split_path.exists():
         splits = json.loads(split_path.read_text())
     else:

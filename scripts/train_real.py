@@ -1,3 +1,4 @@
+import argparse
 import copy
 import hashlib
 import json
@@ -68,8 +69,11 @@ def train_trial(positive, negative, weights, validation_evaluations, seed: int, 
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--split", default="data/manifests/real-splits.json")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    splits = json.loads((root / "data/manifests/real-splits.json").read_text())
+    splits = json.loads((root / args.split).read_text())
     train_pairs, train_evaluations = load_partition(root, splits, "train")
     _, validation_evaluations = load_partition(root, splits, "validation")
     if not train_pairs or not validation_evaluations:

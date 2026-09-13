@@ -1,6 +1,6 @@
 import json
 
-from ml.cohort import choose_active_users, choose_users, count_user_listens, extract_usernames
+from ml.cohort import choose_active_users, choose_active_users_excluding, choose_users, count_user_listens, extract_usernames
 
 
 def test_extracts_unique_usernames_and_skips_malformed_rows():
@@ -26,3 +26,10 @@ def test_selects_randomly_only_among_users_with_enough_incremental_activity():
     counts = count_user_listens(rows)
     assert counts == {"alice": 4, "bob": 3, "quiet": 2}
     assert set(choose_active_users(counts, count=10, minimum_listens=3, seed=41)) == {"alice", "bob"}
+
+
+def test_active_user_selection_can_exclude_a_previous_cohort():
+    counts = {f"user-{index}": 30 for index in range(20)}
+    selected = choose_active_users_excluding(counts, 10, 20, 73, {"user-0", "user-1"})
+    assert len(selected) == 10
+    assert not set(selected) & {"user-0", "user-1"}

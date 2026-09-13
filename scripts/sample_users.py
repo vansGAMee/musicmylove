@@ -1,18 +1,33 @@
+import argparse
 import hashlib
 import json
 from pathlib import Path
 
-from ml.cohort import activity_from_archive, choose_active_users, discover_latest_archive, download_verified
+from ml.cohort import activity_from_archive, choose_active_users_excluding, discover_latest_archive, download_verified
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", default="data/manifests/usernames.json")
+    parser.add_argument("--exclude")
+    parser.add_argument("--count", type=int, default=500)
+    parser.add_argument("--seed", type=int, default=41)
+    parser.add_argument("--source-url")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    url, dump_id = discover_latest_archive()
+    if args.source_url:
+        url = args.source_url
+        dump_id = url.rstrip("/").split("/")[-2]
+    else:
+        url, dump_id = discover_latest_archive()
     archive = root / "data/downloads" / url.rsplit("/", 1)[-1]
     byte_count, sha256 = download_verified(url, archive)
     try:
         counts = activity_from_archive(archive)
-        selected = choose_active_users(counts, 500, 20, 41)
+        excluded = set()
+        if args.exclude:
+            excluded = set(json.loads((root / args.exclude).read_text()).get("usernames", []))
+        selected = choose_active_users_excluding(counts, args.count, 20, args.seed, excluded)
         manifest = {
             "source_url": url,
             "dump_id": dump_id,
@@ -21,10 +36,11 @@ def main() -> None:
             "unique_usernames_in_dump": len(counts),
             "users_with_at_least_20_incremental_listens": sum(value >= 20 for value in counts.values()),
             "activity_threshold": 20,
-            "sample_seed": 41,
+            "sample_seed": args.seed,
+            "excluded_users": len(excluded),
             "usernames": selected,
         }
-        destination = root / "data/manifests/usernames.json"
+        destination = root / args.output
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(json.dumps(manifest, indent=2) + "\n")
         sample_hash = hashlib.sha256("\n".join(selected).encode()).hexdigest()

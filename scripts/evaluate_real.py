@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -17,11 +18,16 @@ def artifact_score(features, artifact):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--split", default="data/manifests/real-splits.json")
+    parser.add_argument("--marker", default="data/manifests/frozen-test-evaluated.json")
+    parser.add_argument("--report", default="reports/evaluation.json")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    marker = root / "data/manifests/frozen-test-evaluated.json"
+    marker = root / args.marker
     if marker.exists():
         raise SystemExit("frozen test was already evaluated; refusing repeated inspection")
-    splits = json.loads((root / "data/manifests/real-splits.json").read_text())
+    splits = json.loads((root / args.split).read_text())
     artifact_bytes = (root / "ml/model.json").read_bytes()
     artifact = json.loads(artifact_bytes)
     _, evaluations = load_partition(root, splits, "test")
@@ -46,7 +52,7 @@ def main():
         "average_candidate_pool_size": sum(len(row["candidates"]) for row in evaluations) / len(evaluations),
         "external_retrieval_limitation": "ListenBrainz Labs is precomputed and may include held-out-user activity; metrics isolate only MusicMyLove reranking."
     }
-    (root / "reports/evaluation.json").write_text(json.dumps(output, indent=2) + "\n")
+    (root / args.report).write_text(json.dumps(output, indent=2) + "\n")
     marker.write_text(json.dumps({"model_sha256": hashlib.sha256(artifact_bytes).hexdigest(), "evaluated_examples": len(evaluations)}) + "\n")
     print(json.dumps(output))
 

@@ -49,6 +49,10 @@ def choose_active_users(counts: dict[str, int], count: int, minimum_listens: int
     return choose_users([name for name, listens in counts.items() if listens >= minimum_listens], count, seed)
 
 
+def choose_active_users_excluding(counts: dict[str, int], count: int, minimum_listens: int, seed: int, excluded: set[str]) -> list[str]:
+    return choose_users([name for name, listens in counts.items() if listens >= minimum_listens and name not in excluded], count, seed)
+
+
 def _read_url(url: str) -> bytes:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=30) as response:
