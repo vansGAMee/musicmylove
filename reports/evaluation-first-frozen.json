@@ -1,0 +1,99 @@
+{
+  "scope": "frozen real-public-user cold-start test",
+  "evaluated_users": 60,
+  "evaluated_examples": 180,
+  "rankers": {
+    "max_similarity": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.012222222222222223,
+      "ndcg_at_20": 0.008027578756528543,
+      "hit_rate_at_20": 0.06111111111111111,
+      "artist_diversity_at_20": 13.022222222222222
+    },
+    "rrf": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.009194664725160076,
+      "hit_rate_at_20": 0.07222222222222222,
+      "artist_diversity_at_20": 13.005555555555556
+    },
+    "neural": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.013333333333333336,
+      "ndcg_at_20": 0.008947317969693176,
+      "hit_rate_at_20": 0.05555555555555555,
+      "artist_diversity_at_20": 12.755555555555556
+    },
+    "ensemble_0.1": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.011047611894671724,
+      "hit_rate_at_20": 0.06666666666666667,
+      "artist_diversity_at_20": 13.033333333333333
+    },
+    "ensemble_0.2": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.010886105190938444,
+      "hit_rate_at_20": 0.06666666666666667,
+      "artist_diversity_at_20": 13.072222222222223
+    },
+    "ensemble_0.3": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.011455353470725039,
+      "hit_rate_at_20": 0.07222222222222222,
+      "artist_diversity_at_20": 13.03888888888889
+    },
+    "ensemble_0.4": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.010818517607621307,
+      "hit_rate_at_20": 0.07222222222222222,
+      "artist_diversity_at_20": 12.96111111111111
+    },
+    "ensemble_0.5": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.012423481184902743,
+      "hit_rate_at_20": 0.07777777777777778,
+      "artist_diversity_at_20": 12.905555555555555
+    },
+    "ensemble_0.6": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.011201974762058331,
+      "hit_rate_at_20": 0.07777777777777778,
+      "artist_diversity_at_20": 12.872222222222222
+    },
+    "ensemble_0.7": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.016666666666666666,
+      "ndcg_at_20": 0.011828888221192766,
+      "hit_rate_at_20": 0.07777777777777778,
+      "artist_diversity_at_20": 12.78888888888889
+    },
+    "ensemble_0.8": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.011270025404125415,
+      "hit_rate_at_20": 0.06666666666666667,
+      "artist_diversity_at_20": 12.744444444444444
+    },
+    "ensemble_0.9": {
+      "retrieval_recall": 0.05583333333333334,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.009914813887457862,
+      "hit_rate_at_20": 0.06111111111111111,
+      "artist_diversity_at_20": 12.738888888888889
+    }
+  },
+  "selected_production_ranker": "neural",
+  "strongest_baseline": "rrf",
+  "paired_bootstrap_ndcg_delta_95_ci": [
+    -0.00518108230535591,
+    0.004817515406281074
+  ],
+  "average_candidate_pool_size": 107.79444444444445,
+  "external_retrieval_limitation": "ListenBrainz Labs is precomputed and may include held-out-user activity; metrics isolate only MusicMyLove reranking."
+}
