@@ -17,11 +17,12 @@ export default function MusicRecommender() {
   const [rankedPool, setRankedPool] = useState<RankedTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>(readFeedback);
+  const [spotifyLinks, setSpotifyLinks] = useState<Record<string, string>>({});
   const lists = useRef<Record<string, SimilarTrack[]>>({});
   const pending = useRef<Partial<Record<string, Promise<SimilarTrack[]>>>>({});
 
   useEffect(() => {
-    if (query.trim().length < 2 || seeds.length >= 5) { setSearchResults([]); return; }
+    if (query.trim().length < 2 || seeds.length >= 5) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -65,18 +66,30 @@ export default function MusicRecommender() {
   };
   const visible = useMemo(() => diversify(rankedPool.filter((track) => feedback[track.mbid] !== "dislike"), 20), [rankedPool, feedback]);
 
+  useEffect(() => {
+    if (!rankedPool.length) return;
+    const finalTracks = diversify(rankedPool, 20);
+    void Promise.all(finalTracks.map(async (track) => {
+      try {
+        const response = await fetch(`/api/spotify/${track.mbid}`);
+        const payload = response.ok ? await response.json() as { id: string | null } : { id: null };
+        return [track.mbid, payload.id ? `https://open.spotify.com/track/${payload.id}` : spotifySearch(track)] as const;
+      } catch { return [track.mbid, spotifySearch(track)] as const; }
+    })).then((entries) => setSpotifyLinks(Object.fromEntries(entries)));
+  }, [rankedPool]);
+
   return <main className="shell">
     <header><span className="eyebrow">MUSIC, FOUND BY MUSIC</span><h1>Give me 5 songs you love.<br /><em>I&apos;ll predict what you&apos;ll love next.</em></h1></header>
     <section className="picker" aria-label="Choose songs">
       <div className="progress"><span>{seeds.length} / 5</span><div>{Array.from({ length: 5 }, (_, i) => <i key={i} className={i < seeds.length ? "filled" : ""} />)}</div></div>
-      {seeds.length < 5 && <div className="search"><input role="combobox" aria-label="Search for a song" placeholder="Search a song or artist…" value={query} onChange={(event) => setQuery(event.target.value)} autoComplete="off" />
-        {searchResults.length > 0 && <div className="menu">{searchResults.slice(0, 8).map((track) => <button key={track.mbid} onClick={() => select(track)}><b>{track.title}</b><span>{track.artist}{track.release ? ` · ${track.release}` : ""}</span></button>)}</div>}
+      {seeds.length < 5 && <div className="search"><input role="combobox" aria-label="Search for a song" aria-controls="search-results" aria-expanded={searchResults.length > 0} placeholder="Search a song or artist…" value={query} onChange={(event) => { const value = event.target.value; setQuery(value); if (value.trim().length < 2) setSearchResults([]); }} autoComplete="off" />
+        {searchResults.length > 0 && <div className="menu" id="search-results">{searchResults.slice(0, 8).map((track) => <button key={track.mbid} onClick={() => select(track)}><b>{track.title}</b><span>{track.artist}{track.release ? ` · ${track.release}` : ""}</span></button>)}</div>}
       </div>}
       <div className="seeds">{seeds.map((seed, i) => <div className="seed" key={seed.mbid}><span>{String(i + 1).padStart(2, "0")}</span><b>{seed.title}</b><small>{seed.artist}</small></div>)}</div>
     </section>
     {loading && <p className="loading">Reading the shape of your taste…</p>}
     {rankedPool.length > 0 && <section className="recommendations"><div className="result-heading"><div><span className="eyebrow">YOUR NEXT TWENTY</span><h2>A little familiar.<br />A little unexpected.</h2></div><p>Built from shared listening patterns—not genres, labels, or guesswork.</p></div>
-      <div className="cards">{visible.map((track, i) => <article data-testid="recommendation" className="card" key={track.mbid}><span className="number">{String(i + 1).padStart(2, "0")}</span><div className="track"><h3>{track.title}</h3><p>{track.artist}</p><small>Picked from: {track.pickedFrom.map((seed) => seed.title).join(" + ") || "your mix"}</small></div><div className="actions"><a href={spotifySearch(track)} target="_blank" rel="noreferrer">Open in Spotify ↗</a><button className={feedback[track.mbid] === "like" ? "active" : ""} onClick={() => saveFeedback(track.mbid, "like")} aria-label={`Like ${track.title}`}>♥</button><button onClick={() => saveFeedback(track.mbid, "dislike")} aria-label={`Dislike ${track.title}`}>×</button></div></article>)}</div>
+      <div className="cards">{visible.map((track, i) => <article data-testid="recommendation" className="card" key={track.mbid}><span className="number">{String(i + 1).padStart(2, "0")}</span><div className="track"><h3>{track.title}</h3><p>{track.artist}</p><small>Picked from: {track.pickedFrom.map((seed) => seed.title).join(" + ") || "your mix"}</small></div><div className="actions"><a href={spotifyLinks[track.mbid] ?? spotifySearch(track)} target="_blank" rel="noreferrer">Open in Spotify ↗</a><button className={feedback[track.mbid] === "like" ? "active" : ""} onClick={() => saveFeedback(track.mbid, "like")} aria-label={`Like ${track.title}`}>♥</button><button onClick={() => saveFeedback(track.mbid, "dislike")} aria-label={`Dislike ${track.title}`}>×</button></div></article>)}</div>
     </section>}
   </main>;
 }

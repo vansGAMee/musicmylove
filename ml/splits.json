@@ -1,0 +1,40 @@
+{
+  "seed": 41,
+  "fixture": true,
+  "train": [
+    "fixture-user-00",
+    "fixture-user-01",
+    "fixture-user-02",
+    "fixture-user-03",
+    "fixture-user-04",
+    "fixture-user-06",
+    "fixture-user-08",
+    "fixture-user-11",
+    "fixture-user-13",
+    "fixture-user-14",
+    "fixture-user-15",
+    "fixture-user-16",
+    "fixture-user-19",
+    "fixture-user-20",
+    "fixture-user-21",
+    "fixture-user-23",
+    "fixture-user-24",
+    "fixture-user-25",
+    "fixture-user-26",
+    "fixture-user-27",
+    "fixture-user-28"
+  ],
+  "validation": [
+    "fixture-user-09",
+    "fixture-user-17",
+    "fixture-user-18",
+    "fixture-user-22"
+  ],
+  "test": [
+    "fixture-user-05",
+    "fixture-user-07",
+    "fixture-user-10",
+    "fixture-user-12",
+    "fixture-user-29"
+  ]
+}

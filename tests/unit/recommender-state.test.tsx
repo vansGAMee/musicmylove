@@ -33,4 +33,5 @@ test("prefetches each selection and automatically returns results after the fift
   expect(screen.getAllByTestId("recommendation")).toHaveLength(20);
   expect(screen.getByText("5 / 5")).toBeInTheDocument();
   expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/similar/"))).toHaveLength(5);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/spotify/"))).toHaveLength(20);
 });
