@@ -4,6 +4,7 @@ import random
 import re
 import subprocess
 import urllib.request
+from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -29,6 +30,23 @@ def choose_users(names: list[str], count: int, seed: int) -> list[str]:
     ordered = sorted(set(names))
     random.Random(seed).shuffle(ordered)
     return ordered[:count]
+
+
+def count_user_listens(lines: Iterable[bytes]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        name = value.get("user_name") if isinstance(value, dict) else None
+        if isinstance(name, str) and name.strip():
+            counts[name.strip()] += 1
+    return dict(sorted(counts.items()))
+
+
+def choose_active_users(counts: dict[str, int], count: int, minimum_listens: int, seed: int) -> list[str]:
+    return choose_users([name for name, listens in counts.items() if listens >= minimum_listens], count, seed)
 
 
 def _read_url(url: str) -> bytes:
@@ -86,3 +104,17 @@ def usernames_from_archive(path: Path) -> list[str]:
     if process.wait() != 0:
         raise RuntimeError(f"Unable to extract dump: {stderr[-1000:]}")
     return names
+
+
+def activity_from_archive(path: Path) -> dict[str, int]:
+    process = subprocess.Popen(
+        ["tar", "--use-compress-program=unzstd", "-xOf", str(path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    counts = count_user_listens(process.stdout)
+    stderr = process.stderr.read().decode() if process.stderr else ""
+    if process.wait() != 0:
+        raise RuntimeError(f"Unable to extract dump: {stderr[-1000:]}")
+    return counts

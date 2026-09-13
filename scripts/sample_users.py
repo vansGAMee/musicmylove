@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from ml.cohort import choose_users, discover_latest_archive, download_verified, usernames_from_archive
+from ml.cohort import activity_from_archive, choose_active_users, discover_latest_archive, download_verified
 
 
 def main() -> None:
@@ -11,14 +11,16 @@ def main() -> None:
     archive = root / "data/downloads" / url.rsplit("/", 1)[-1]
     byte_count, sha256 = download_verified(url, archive)
     try:
-        all_names = usernames_from_archive(archive)
-        selected = choose_users(all_names, 500, 41)
+        counts = activity_from_archive(archive)
+        selected = choose_active_users(counts, 500, 20, 41)
         manifest = {
             "source_url": url,
             "dump_id": dump_id,
             "compressed_bytes": byte_count,
             "sha256": sha256,
-            "unique_usernames_in_dump": len(all_names),
+            "unique_usernames_in_dump": len(counts),
+            "users_with_at_least_20_incremental_listens": sum(value >= 20 for value in counts.values()),
+            "activity_threshold": 20,
             "sample_seed": 41,
             "usernames": selected,
         }
