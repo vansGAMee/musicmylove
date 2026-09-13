@@ -18,7 +18,7 @@ class TinyRanker(nn.Module):
         return self.network(values).squeeze(-1)
 
 
-def export_model(model: TinyRanker, path: Path, feature_names: list[str], production_ranker: str) -> None:
+def export_model(model: TinyRanker, path: Path, feature_names: list[str], production_ranker: str, ensemble_alpha: float | None = None) -> None:
     layers = []
     for module in model.network:
         if isinstance(module, nn.Linear):
@@ -31,6 +31,7 @@ def export_model(model: TinyRanker, path: Path, feature_names: list[str], produc
         "feature_names": feature_names,
         "activation": "relu",
         "production_ranker": production_ranker,
+        "ensemble_alpha": ensemble_alpha,
         "layers": layers,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
