@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 data/cache/
 data/downloads/
+data/manifests/
 *.pyc
 *.tsbuildinfo
 .DS_Store
