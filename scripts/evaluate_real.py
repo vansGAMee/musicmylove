@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from ml.evaluate import paired_bootstrap
+from ml.evaluate import aggregate_by_group, paired_bootstrap
 from ml.train_real import evaluate_rankers
 from scripts.train_real import load_partition
 
@@ -43,12 +43,17 @@ def main():
     per_example = [evaluate_rankers([evaluation], scorer) for evaluation in evaluations]
     selected_ndcg = [row[selected_name]["ndcg_at_20"] for row in per_example]
     baseline_ndcg = [row[strongest_baseline]["ndcg_at_20"] for row in per_example]
+    user_groups = [evaluation["user_index"] for evaluation in evaluations]
+    selected_user_ndcg = aggregate_by_group(selected_ndcg, user_groups)
+    baseline_user_ndcg = aggregate_by_group(baseline_ndcg, user_groups)
     output = {
         "scope": "frozen real-public-user cold-start test",
         "evaluated_users": len(splits["test"]), "evaluated_examples": len(evaluations),
         "rankers": rankers, "selected_production_ranker": selected_name,
         "strongest_baseline": strongest_baseline,
-        "paired_bootstrap_ndcg_delta_95_ci": paired_bootstrap(selected_ndcg, baseline_ndcg),
+        "paired_bootstrap_unit": "user (mean of three examples)",
+        "paired_bootstrap_ndcg_delta_95_ci": paired_bootstrap(selected_user_ndcg, baseline_user_ndcg),
+        "per_example_ndcg": [{"selected": selected, "baseline": baseline} for selected, baseline in zip(selected_ndcg, baseline_ndcg)],
         "average_candidate_pool_size": sum(len(row["candidates"]) for row in evaluations) / len(evaluations),
         "external_retrieval_limitation": "ListenBrainz Labs is precomputed and may include held-out-user activity; metrics isolate only MusicMyLove reranking."
     }

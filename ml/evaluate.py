@@ -2,6 +2,15 @@ import math
 import random
 
 
+def aggregate_by_group(values: list[float], groups: list[int]) -> list[float]:
+    if len(values) != len(groups):
+        raise ValueError("values and groups must have equal length")
+    grouped: dict[int, list[float]] = {}
+    for value, group in zip(values, groups):
+        grouped.setdefault(group, []).append(value)
+    return [sum(grouped[group]) / len(grouped[group]) for group in sorted(grouped)]
+
+
 def metrics(hidden: list[str], pool: list[str], top: list[str]) -> dict[str, float]:
     hidden_set = set(hidden)
     retrieved = len(hidden_set & set(pool)) / len(hidden_set) if hidden_set else 0.0

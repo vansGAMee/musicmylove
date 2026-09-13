@@ -17,7 +17,7 @@ def cache_key(value: str) -> str:
 
 def load_partition(root: Path, splits: dict, partition: str):
     pairs, evaluations = [], []
-    for username in splits[partition]:
+    for user_index, username in enumerate(splits[partition]):
         identifier = cache_key(username)
         profile_path = root / f"data/cache/real-profiles/{identifier}.json"
         retrieval_path = root / f"data/cache/real-retrieval/{identifier}.json"
@@ -28,6 +28,7 @@ def load_partition(root: Path, splits: dict, partition: str):
         rows = retrieval.get("rows", [])
         for example in retrieval.get("examples", []):
             example_pairs, evaluation = make_example_pairs(example, profile, rows, random_seed=41 + example["example_index"])
+            evaluation["user_index"] = user_index
             pairs.extend(example_pairs)
             evaluations.append(evaluation)
     return pairs, evaluations
