@@ -1,0 +1,13 @@
+.worktrees/
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+__pycache__/
+.pytest_cache/
+.venv/
+data/cache/
+data/downloads/
+*.pyc
+.DS_Store
