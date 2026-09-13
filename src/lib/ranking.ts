@@ -12,19 +12,22 @@ const SEED_COUNT = 5;
 const RRF_K = 60;
 
 const artistKey = (artist: string): string => artist.trim().toLocaleLowerCase();
+const textKey = (value: string): string => value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+const trackKey = (track: { artist: string; title: string }): string => `${textKey(track.artist)}\u001f${textKey(track.title)}`;
 
 export function mergeCandidates(
   seeds: readonly SeedTrack[],
   lists: SimilarityLists,
 ): CandidateEvidence[] {
   const seedMbids = new Set(seeds.map((seed) => seed.mbid));
+  const seedTracks = new Set(seeds.map(trackKey));
   const merged = new Map<string, CandidateEvidence>();
 
   for (const seed of [...seeds].sort((a, b) => a.mbid.localeCompare(b.mbid))) {
     const list = lists[seed.mbid] ?? [];
     const maxScore = Math.max(0, ...list.map((item) => item.score));
     list.forEach((track, index) => {
-      if (seedMbids.has(track.mbid)) return;
+      if (seedMbids.has(track.mbid) || seedTracks.has(trackKey(track))) return;
       const evidence: SeedEvidence = {
         seedMbid: seed.mbid,
         rank: index + 1,
@@ -151,12 +154,15 @@ export function diversify(
 ): RankedTrack[] {
   const artistCounts = new Map<string, number>();
   const seenMbids = new Set<string>();
+  const seenTracks = new Set<string>();
   const result: RankedTrack[] = [];
   for (const track of ranked) {
     const key = artistKey(track.artist);
-    if (seenMbids.has(track.mbid) || (artistCounts.get(key) ?? 0) >= 2) continue;
+    const identity = trackKey(track);
+    if (seenMbids.has(track.mbid) || seenTracks.has(identity) || (artistCounts.get(key) ?? 0) >= 2) continue;
     result.push(track);
     seenMbids.add(track.mbid);
+    seenTracks.add(identity);
     artistCounts.set(key, (artistCounts.get(key) ?? 0) + 1);
     if (result.length === limit) break;
   }

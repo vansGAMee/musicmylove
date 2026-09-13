@@ -20,7 +20,7 @@ def build_examples(username: str, recordings: list[dict], seed: int) -> list[dic
     for index in range(3):
         shuffled = list(mbids)
         rng.shuffle(shuffled)
-        examples.append({"example_index": index, "seeds": shuffled[:5], "hidden": shuffled[5:8]})
+        examples.append({"example_index": index, "seeds": shuffled[:5], "hidden": shuffled[5:10]})
     return examples
 
 

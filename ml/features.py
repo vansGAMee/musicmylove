@@ -1,8 +1,18 @@
 import math
+import unicodedata
+
+
+def normalize_text(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", str(value)).casefold().split())
+
+
+def track_identity(artist: str, title: str) -> str:
+    return f"{normalize_text(artist)}\x1f{normalize_text(title)}"
 
 
 def merge_candidate_rows(seeds: list[dict], rows: list[dict]) -> dict[str, dict]:
     seed_ids = {seed["mbid"] for seed in seeds}
+    seed_tracks = {track_identity(seed.get("artist", ""), seed.get("title", seed["mbid"])) for seed in seeds}
     by_reference: dict[str, list[dict]] = {seed["mbid"]: [] for seed in seeds}
     for row in rows:
         reference = row.get("reference_mbid")
@@ -14,12 +24,14 @@ def merge_candidate_rows(seeds: list[dict], rows: list[dict]) -> dict[str, dict]
         maximum = max([max(0.0, float(row["score"])) for row in listing] or [0.0])
         for rank, row in enumerate(listing, 1):
             mbid = row["recording_mbid"]
-            if mbid in seed_ids:
+            identity = track_identity(row.get("artist_credit_name", "Unknown artist"), row.get("recording_name", mbid))
+            if mbid in seed_ids or identity in seed_tracks:
                 continue
             candidate = candidates.setdefault(mbid, {
                 "mbid": mbid,
                 "title": row.get("recording_name", mbid),
                 "artist": row.get("artist_credit_name", "Unknown artist"),
+                "identity": identity,
                 "evidence": [],
             })
             candidate["evidence"].append({

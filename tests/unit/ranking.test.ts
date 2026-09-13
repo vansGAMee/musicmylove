@@ -38,6 +38,11 @@ describe("candidate construction", () => {
     expect(merged.find((item) => item.mbid === "x")?.evidence).toHaveLength(3);
   });
 
+  test("excludes alternate MBIDs of a seed with the same artist and title", () => {
+    const duplicate = track("alternate-mbid", " artist a ", 100, " A ");
+    expect(mergeCandidates(seeds, { ...lists, "seed-a": [duplicate, ...lists["seed-a"]] }).some((item) => item.mbid === duplicate.mbid)).toBe(false);
+  });
+
   test("normalizes each list independently and constructs exactly 17 ordered features", () => {
     const candidate = mergeCandidates(seeds, lists).find((item) => item.mbid === "x")!;
     const features = buildFeatures(candidate, seeds);
@@ -104,5 +109,10 @@ describe("ranking", () => {
       pickedFrom: [],
     }));
     expect(diversify(ranked, 20).map((item) => item.mbid)).toEqual(["1", "2", "4"]);
+  });
+
+  test("removes alternate MBIDs of the same artist and title", () => {
+    const ranked = ["one", "alternate", "other"].map((mbid, index) => ({ mbid, title: index < 2 ? "Same Song" : "Other", artist: index < 2 ? "Artist" : "Else", score: 3 - index, features: Array(17).fill(0), pickedFrom: [] }));
+    expect(diversify(ranked, 20).map((item) => item.mbid)).toEqual(["one", "other"]);
   });
 });

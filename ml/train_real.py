@@ -4,20 +4,28 @@ import random
 import torch
 from torch.nn import functional as F
 
-from ml.features import build_candidate_features, merge_candidate_rows
+from ml.features import build_candidate_features, merge_candidate_rows, track_identity
 from ml.evaluate import metrics
 
 
 def validate_similarity_rows(value) -> list[dict]:
     if not isinstance(value, list):
         raise ValueError("similarity response must be a list")
-    required_strings = ("reference_mbid", "recording_mbid", "recording_name", "artist_credit_name")
-    for row in value:
-        if not isinstance(row, dict) or any(not isinstance(row.get(field), str) or not row[field] for field in required_strings):
-            raise ValueError("similarity response contains a malformed row")
-        if isinstance(row.get("score"), bool) or not isinstance(row.get("score"), (int, float)) or not math.isfinite(float(row["score"])):
-            raise ValueError("similarity response contains an invalid score")
-    return value
+    normalized = []
+    for source in value:
+        if not isinstance(source, dict) or any(not isinstance(source.get(field), str) or not source[field] for field in ("reference_mbid", "recording_mbid")):
+            continue
+        if isinstance(source.get("score"), bool) or not isinstance(source.get("score"), (int, float)) or not math.isfinite(float(source["score"])):
+            continue
+        row = dict(source)
+        if not isinstance(row.get("recording_name"), str) or not row["recording_name"]:
+            row["recording_name"] = row["recording_mbid"]
+        if not isinstance(row.get("artist_credit_name"), str) or not row["artist_credit_name"]:
+            row["artist_credit_name"] = "Unknown artist"
+        normalized.append(row)
+    if value and not normalized:
+        raise ValueError("similarity response contains no valid rows")
+    return normalized
 
 
 def bpr_loss(positive_scores: torch.Tensor, negative_scores: torch.Tensor, weights: torch.Tensor | None = None) -> torch.Tensor:
@@ -27,32 +35,35 @@ def bpr_loss(positive_scores: torch.Tensor, negative_scores: torch.Tensor, weigh
 
 def make_example_pairs(example: dict, profile: list[dict], rows: list[dict], random_seed: int) -> tuple[list[dict], dict]:
     profile_by_mbid = {row.get("recording_mbid"): row for row in profile if isinstance(row.get("recording_mbid"), str)}
-    seeds = [{"mbid": mbid, "artist": profile_by_mbid.get(mbid, {}).get("artist_name", "")} for mbid in example["seeds"]]
+    seeds = [{"mbid": mbid, "artist": profile_by_mbid.get(mbid, {}).get("artist_name", ""), "title": profile_by_mbid.get(mbid, {}).get("track_name", mbid)} for mbid in example["seeds"]]
     candidates = merge_candidate_rows(seeds, rows)
-    known = set(profile_by_mbid)
-    retrieved_hidden = sorted(set(example["hidden"]) & set(candidates))
-    negatives = [candidate for mbid, candidate in candidates.items() if mbid not in known]
+    profile_identity = {mbid: track_identity(row.get("artist_name", ""), row.get("track_name", mbid)) for mbid, row in profile_by_mbid.items()}
+    known = set(profile_identity.values())
+    hidden = sorted({profile_identity[mbid] for mbid in example["hidden"] if mbid in profile_identity})
+    retrieved_hidden = sorted(set(hidden) & {candidate["identity"] for candidate in candidates.values()})
+    negatives = [candidate for candidate in candidates.values() if candidate["identity"] not in known]
     negatives.sort(key=lambda candidate: (-build_candidate_features(candidate, seeds)[10], candidate["mbid"]))
     hard = negatives[:20]
     remaining = negatives[20:]
     random.Random(random_seed).shuffle(remaining)
     selected_negatives = hard + remaining[:20]
     pairs = []
-    for positive_mbid in retrieved_hidden:
-        positive_features = build_candidate_features(candidates[positive_mbid], seeds)
-        weight = math.log1p(profile_by_mbid[positive_mbid].get("listen_count", 1))
-        for negative in selected_negatives:
-            pairs.append({
-                "positive_mbid": positive_mbid,
-                "negative_mbid": negative["mbid"],
-                "positive": positive_features,
-                "negative": build_candidate_features(negative, seeds),
-                "weight": weight,
-            })
+    hidden_weight = {profile_identity[mbid]: math.log1p(profile_by_mbid[mbid].get("listen_count", 1)) for mbid in example["hidden"] if mbid in profile_identity}
+    for positive in candidates.values():
+        if positive["identity"] in hidden_weight:
+            positive_features = build_candidate_features(positive, seeds)
+            for negative in selected_negatives:
+                pairs.append({
+                    "positive_mbid": positive["mbid"],
+                    "negative_mbid": negative["mbid"],
+                    "positive": positive_features,
+                    "negative": build_candidate_features(negative, seeds),
+                    "weight": hidden_weight[positive["identity"]],
+                })
     evaluation = {
-        "hidden": sorted(example["hidden"]),
+        "hidden": hidden,
         "retrieved_hidden": retrieved_hidden,
-        "candidates": [{"mbid": candidate["mbid"], "artist": candidate["artist"], "features": build_candidate_features(candidate, seeds)} for candidate in candidates.values()],
+        "candidates": [{"mbid": candidate["mbid"], "title": candidate["title"], "artist": candidate["artist"], "identity": candidate["identity"], "features": build_candidate_features(candidate, seeds)} for candidate in candidates.values()],
     }
     return pairs, evaluation
 
@@ -68,12 +79,15 @@ def choose_production_ranker(validation: dict[str, dict[str, float]]) -> tuple[s
 
 def diversify_ranking(ranking: list[dict], limit: int = 20) -> list[dict]:
     counts: dict[str, int] = {}
+    seen_tracks: set[str] = set()
     output = []
     for item in ranking:
         artist = str(item.get("artist", "")).strip().casefold()
-        if counts.get(artist, 0) >= 2:
+        identity = item.get("identity") or track_identity(item.get("artist", ""), item.get("title", item.get("mbid", "")))
+        if identity in seen_tracks or counts.get(artist, 0) >= 2:
             continue
         output.append(item)
+        seen_tracks.add(identity)
         counts[artist] = counts.get(artist, 0) + 1
         if len(output) == limit:
             break
@@ -102,7 +116,7 @@ def evaluate_rankers(evaluations: list[dict], neural_scorer) -> dict[str, dict[s
             rankings[name] = sorted(candidates, key=lambda item: (-(alpha * rank_percentiles["neural"][item["mbid"]] + (1 - alpha) * rank_percentiles["rrf"][item["mbid"]]), item["mbid"]))
         for name, ranking in rankings.items():
             top = diversify_ranking(ranking, 20)
-            rows[name].append(metrics(evaluation["hidden"], [item["mbid"] for item in candidates], [item["mbid"] for item in top]))
+            rows[name].append(metrics(evaluation["hidden"], [item.get("identity", item["mbid"]) for item in candidates], [item.get("identity", item["mbid"]) for item in top]))
             diversities[name].append(len({item["artist"].casefold() for item in top}))
     output = {}
     for name in names:

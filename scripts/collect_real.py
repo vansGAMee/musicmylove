@@ -10,6 +10,7 @@ from ml.examples import build_examples, is_suitable
 from ml.train_real import validate_similarity_rows
 
 ALGORITHM = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30_top_n_listeners_1000"
+MLHD_ALGORITHM = "session_based_mlhd_session_300_contribution_5_threshold_15_limit_50_skip_30"
 
 
 def key(value: str) -> str:
@@ -20,6 +21,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", choices=["profiles", "retrieval", "all"], default="all")
     parser.add_argument("--max-users", type=int, default=400)
+    parser.add_argument("--retrieval-source", choices=["listenbrainz", "mlhd"], default="listenbrainz")
+    parser.add_argument("--partitions", nargs="+", choices=["train", "validation", "test"], default=["train", "validation", "test"])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((root / "data/manifests/usernames.json").read_text())
@@ -47,10 +50,14 @@ def main():
     if args.stage == "profiles":
         print(json.dumps({"usable": len(usable), "split_counts": {name: len(splits[name]) for name in ("train", "validation", "test")}})); return
     by_name = {item["username"]: item for item in usable}
-    retrieval_dir = root / "data/cache/real-retrieval"
-    retrieval_raw_dir = root / "data/cache/real-retrieval-raw"
+    suffix = "" if args.retrieval_source == "listenbrainz" else "-mlhd"
+    retrieval_dir = root / f"data/cache/real-retrieval{suffix}"
+    retrieval_raw_dir = root / f"data/cache/real-retrieval-raw{suffix}"
+    endpoint = "similar-recordings" if args.retrieval_source == "listenbrainz" else "mlhd-similar-recordings"
+    algorithm = ALGORITHM if args.retrieval_source == "listenbrainz" else MLHD_ALGORITHM
     completed = 0
-    for partition in ("train", "validation", "test"):
+    target_count = sum(len(splits[partition]) for partition in args.partitions)
+    for partition in args.partitions:
         for username in splits[partition]:
             if username not in by_name:
                 continue
@@ -58,12 +65,12 @@ def main():
             raw_destination = retrieval_raw_dir / f"{key(username)}.json"
             examples = build_examples(username, by_name[username]["recordings"], 41)
             seed_mbids = sorted({mbid for example in examples for mbid in example["seeds"]})
-            payload = [{"recording_mbids": seed_mbids, "algorithm": ALGORITHM}]
+            payload = [{"recording_mbids": seed_mbids, "algorithm": algorithm}]
             try:
                 rows = client.cached_json(
                     raw_destination,
                     "POST",
-                    "https://labs.api.listenbrainz.org/similar-recordings/json",
+                    f"https://labs.api.listenbrainz.org/{endpoint}/json",
                     payload,
                     validator=validate_similarity_rows,
                 )
@@ -75,8 +82,8 @@ def main():
             except PermanentApiError as error:
                 print(f"retrieval_error completed={completed} type={type(error).__name__}", flush=True)
             if completed % 25 == 0:
-                print(f"retrieval={completed}/{len(usable)}", flush=True)
-    print(json.dumps({"usable": len(usable), "retrieval_users": completed, "split_counts": {name: len(splits[name]) for name in ("train", "validation", "test")}}))
+                print(f"retrieval={completed}/{target_count}", flush=True)
+    print(json.dumps({"usable": len(usable), "retrieval_source": args.retrieval_source, "retrieval_users": completed, "split_counts": {name: len(splits[name]) for name in ("train", "validation", "test")}}))
 
 
 if __name__ == "__main__": main()

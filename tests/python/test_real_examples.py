@@ -16,7 +16,7 @@ def test_builds_three_deterministic_seed_hidden_examples():
     second = build_examples("alice", list(reversed(recordings())), 41)
     assert first == second
     assert len(first) == 3
-    assert all(len(example["seeds"]) == 5 and len(example["hidden"]) == 3 for example in first)
+    assert all(len(example["seeds"]) == 5 and len(example["hidden"]) == 5 for example in first)
     assert all(not (set(example["seeds"]) & set(example["hidden"])) for example in first)
 
 
