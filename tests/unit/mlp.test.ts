@@ -19,3 +19,7 @@ test("runs dense and ReLU layers identically", () => {
 test("rejects a feature width mismatch", () => {
   expect(() => validateModel({ ...artifact, feature_names: ["a"] })).toThrow(/width/i);
 });
+
+test("rejects an invalid ensemble coefficient", () => {
+  expect(() => validateModel({ ...artifact, production_ranker: "ensemble", ensemble_alpha: 1.2 })).toThrow(/ensemble/i);
+});

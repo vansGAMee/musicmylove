@@ -36,3 +36,17 @@ def export_model(model: TinyRanker, path: Path, feature_names: list[str], produc
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(artifact, indent=2) + "\n")
+
+
+def load_model(path: Path, dtype=torch.float64) -> tuple[TinyRanker, dict]:
+    artifact = json.loads(path.read_text())
+    model = TinyRanker(len(artifact["feature_names"])).to(dtype=dtype)
+    linear_layers = [module for module in model.network if isinstance(module, nn.Linear)]
+    if len(linear_layers) != len(artifact["layers"]):
+        raise ValueError("artifact layer count mismatch")
+    with torch.no_grad():
+        for module, layer in zip(linear_layers, artifact["layers"]):
+            module.weight.copy_(torch.tensor(layer["weight"], dtype=dtype))
+            module.bias.copy_(torch.tensor(layer["bias"], dtype=dtype))
+    model.eval()
+    return model, artifact

@@ -1,6 +1,6 @@
 import torch
 
-from ml.train_real import bpr_loss, choose_production_ranker, evaluate_rankers, make_example_pairs
+from ml.train_real import bpr_loss, choose_production_ranker, diversify_ranking, evaluate_rankers, make_example_pairs, validate_similarity_rows
 
 
 def similarity(reference, mbid, score, artist="Candidate"):
@@ -28,6 +28,7 @@ def test_bpr_loss_rewards_positive_score_above_negative():
 def test_production_selection_uses_validation_ndcg_only():
     validation = {"rrf": {"ndcg_at_20": 0.5}, "neural": {"ndcg_at_20": 0.6}, "ensemble_0.7": {"ndcg_at_20": 0.65}}
     assert choose_production_ranker(validation) == ("ensemble", 0.7)
+    assert choose_production_ranker({"max_similarity": {"ndcg_at_20": 0.8}, "rrf": {"ndcg_at_20": 0.5}}) == ("max", None)
 
 
 def test_ranker_evaluation_reports_retrieval_separately():
@@ -39,3 +40,18 @@ def test_ranker_evaluation_reports_retrieval_separately():
     assert result["neural"]["retrieval_recall"] == 1.0
     assert result["neural"]["ndcg_at_20"] == 1.0
     assert set(result) >= {"max_similarity", "rrf", "neural", "ensemble_0.5"}
+
+
+def test_offline_ranking_applies_same_two_per_artist_cap_as_production():
+    ranking = [{"mbid": str(i), "artist": "same" if i < 4 else "other"} for i in range(5)]
+    assert [row["mbid"] for row in diversify_ranking(ranking, 20)] == ["0", "1", "4"]
+
+
+def test_similarity_response_validation_rejects_malformed_rows():
+    assert validate_similarity_rows([similarity("s0", "candidate", 90)])
+    for malformed in ({}, [None], [{"reference_mbid": "s0", "recording_mbid": "x", "score": "90"}]):
+        try:
+            validate_similarity_rows(malformed)
+            assert False, f"accepted malformed response: {malformed!r}"
+        except ValueError:
+            pass

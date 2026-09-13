@@ -7,6 +7,7 @@ from pathlib import Path
 from ml.api import ApiClient, PermanentApiError
 from ml.data import create_user_splits
 from ml.examples import build_examples, is_suitable
+from ml.train_real import validate_similarity_rows
 
 ALGORITHM = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30_top_n_listeners_1000"
 
@@ -47,18 +48,29 @@ def main():
         print(json.dumps({"usable": len(usable), "split_counts": {name: len(splits[name]) for name in ("train", "validation", "test")}})); return
     by_name = {item["username"]: item for item in usable}
     retrieval_dir = root / "data/cache/real-retrieval"
+    retrieval_raw_dir = root / "data/cache/real-retrieval-raw"
     completed = 0
     for partition in ("train", "validation", "test"):
         for username in splits[partition]:
             if username not in by_name:
                 continue
             destination = retrieval_dir / f"{key(username)}.json"
+            raw_destination = retrieval_raw_dir / f"{key(username)}.json"
             examples = build_examples(username, by_name[username]["recordings"], 41)
             seed_mbids = sorted({mbid for example in examples for mbid in example["seeds"]})
             payload = [{"recording_mbids": seed_mbids, "algorithm": ALGORITHM}]
             try:
-                rows = client.cached_json(destination, "POST", "https://labs.api.listenbrainz.org/similar-recordings/json", payload)
-                destination.write_text(json.dumps({"partition": partition, "examples": examples, "rows": rows}))
+                rows = client.cached_json(
+                    raw_destination,
+                    "POST",
+                    "https://labs.api.listenbrainz.org/similar-recordings/json",
+                    payload,
+                    validator=validate_similarity_rows,
+                )
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary = destination.with_suffix(".json.tmp")
+                temporary.write_text(json.dumps({"partition": partition, "examples": examples, "rows": rows}))
+                temporary.replace(destination)
                 completed += 1
             except PermanentApiError as error:
                 print(f"retrieval_error completed={completed} type={type(error).__name__}", flush=True)

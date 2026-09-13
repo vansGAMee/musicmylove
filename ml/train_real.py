@@ -8,6 +8,18 @@ from ml.features import build_candidate_features, merge_candidate_rows
 from ml.evaluate import metrics
 
 
+def validate_similarity_rows(value) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError("similarity response must be a list")
+    required_strings = ("reference_mbid", "recording_mbid", "recording_name", "artist_credit_name")
+    for row in value:
+        if not isinstance(row, dict) or any(not isinstance(row.get(field), str) or not row[field] for field in required_strings):
+            raise ValueError("similarity response contains a malformed row")
+        if isinstance(row.get("score"), bool) or not isinstance(row.get("score"), (int, float)) or not math.isfinite(float(row["score"])):
+            raise ValueError("similarity response contains an invalid score")
+    return value
+
+
 def bpr_loss(positive_scores: torch.Tensor, negative_scores: torch.Tensor, weights: torch.Tensor | None = None) -> torch.Tensor:
     losses = F.softplus(-(positive_scores - negative_scores))
     return (losses * weights).mean() if weights is not None else losses.mean()
@@ -49,7 +61,23 @@ def choose_production_ranker(validation: dict[str, dict[str, float]]) -> tuple[s
     winner = max(validation, key=lambda name: (validation[name]["ndcg_at_20"], name))
     if winner.startswith("ensemble_"):
         return "ensemble", float(winner.split("_", 1)[1])
+    if winner == "max_similarity":
+        return "max", None
     return winner, None
+
+
+def diversify_ranking(ranking: list[dict], limit: int = 20) -> list[dict]:
+    counts: dict[str, int] = {}
+    output = []
+    for item in ranking:
+        artist = str(item.get("artist", "")).strip().casefold()
+        if counts.get(artist, 0) >= 2:
+            continue
+        output.append(item)
+        counts[artist] = counts.get(artist, 0) + 1
+        if len(output) == limit:
+            break
+    return output
 
 
 def evaluate_rankers(evaluations: list[dict], neural_scorer) -> dict[str, dict[str, float]]:
@@ -73,7 +101,7 @@ def evaluate_rankers(evaluations: list[dict], neural_scorer) -> dict[str, dict[s
             name = f"ensemble_{alpha:.1f}"
             rankings[name] = sorted(candidates, key=lambda item: (-(alpha * rank_percentiles["neural"][item["mbid"]] + (1 - alpha) * rank_percentiles["rrf"][item["mbid"]]), item["mbid"]))
         for name, ranking in rankings.items():
-            top = ranking[:20]
+            top = diversify_ranking(ranking, 20)
             rows[name].append(metrics(evaluation["hidden"], [item["mbid"] for item in candidates], [item["mbid"] for item in top]))
             diversities[name].append(len({item["artist"].casefold() for item in top}))
     output = {}

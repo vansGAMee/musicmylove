@@ -1,4 +1,5 @@
 import math
+import random
 
 
 def metrics(hidden: list[str], pool: list[str], top: list[str]) -> dict[str, float]:
@@ -9,3 +10,12 @@ def metrics(hidden: list[str], pool: list[str], top: list[str]) -> dict[str, flo
     dcg = sum(hit / math.log2(index + 2) for index, hit in enumerate(hits))
     ideal = sum(1 / math.log2(index + 2) for index in range(min(len(hidden_set), 20)))
     return {"retrieval_recall": retrieved, "recall_at_20": recall, "ndcg_at_20": dcg / ideal if ideal else 0.0, "hit_rate_at_20": float(any(hits))}
+
+
+def paired_bootstrap(final_values: list[float], baseline_values: list[float], samples: int = 2000, seed: int = 41) -> list[float]:
+    if len(final_values) != len(baseline_values) or not final_values:
+        raise ValueError("paired bootstrap requires equal non-empty samples")
+    differences = [final - baseline for final, baseline in zip(final_values, baseline_values)]
+    rng = random.Random(seed)
+    means = sorted(sum(differences[rng.randrange(len(differences))] for _ in differences) / len(differences) for _ in range(samples))
+    return [means[int(samples * 0.025)], means[min(samples - 1, int(samples * 0.975))]]

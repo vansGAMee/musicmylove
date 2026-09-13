@@ -9,6 +9,9 @@ export interface ModelArtifact {
 }
 
 export function validateModel(model: ModelArtifact): void {
+  if (model.production_ranker === "ensemble" && (typeof model.ensemble_alpha !== "number" || model.ensemble_alpha < 0 || model.ensemble_alpha > 1)) {
+    throw new Error("Ensemble coefficient must be between zero and one");
+  }
   if (!model.layers.length || !model.feature_names.length) throw new Error("Model has no layers or features");
   let width = model.feature_names.length;
   for (const layer of model.layers) {

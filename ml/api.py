@@ -105,10 +105,13 @@ class ApiClient:
                 self.sleep(2 ** attempt + self.jitter() * 0.25)
         raise TransientApiError(f"API request failed after 3 attempts: {last_error}")
 
-    def cached_json(self, path: Path, method: str, url: str, payload=None):
+    def cached_json(self, path: Path, method: str, url: str, payload=None, validator=None):
         if path.exists():
-            return json.loads(path.read_text())
+            value = json.loads(path.read_text())
+            return validator(value) if validator else value
         value = self.request_json(method, url, payload)
+        if validator:
+            value = validator(value)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
         temporary.write_text(json.dumps(value))

@@ -41,6 +41,17 @@ def test_uses_cached_value_without_network(tmp_path):
     assert client.cached_json(path, "GET", "https://example.test") == {"value": 7}
 
 
+def test_validates_before_committing_response_to_cache(tmp_path):
+    path = tmp_path / "cached.json"
+    client = ApiClient(transport=lambda *_: HttpResult(200, {}, b'{"wrong":true}'), minimum_interval=0)
+    try:
+        client.cached_json(path, "GET", "https://example.test", validator=lambda value: (_ for _ in ()).throw(ValueError("bad schema")))
+        assert False, "expected schema error"
+    except ValueError:
+        pass
+    assert not path.exists()
+
+
 def test_maps_successful_no_content_to_empty_object():
     client = ApiClient(transport=lambda *_: HttpResult(204, {}, b""), minimum_interval=0)
     assert client.request_json("GET", "https://example.test") == {}

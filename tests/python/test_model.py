@@ -3,7 +3,7 @@ from pathlib import Path
 
 import torch
 
-from ml.model import TinyRanker, export_model
+from ml.model import TinyRanker, export_model, load_model
 
 
 def test_export_preserves_forward_scores(tmp_path: Path):
@@ -20,3 +20,13 @@ def test_export_preserves_forward_scores(tmp_path: Path):
         if index < len(artifact["layers"]) - 1:
             values = [max(0.0, value) for value in values]
     assert abs(values[0] - expected) < 1e-7
+
+
+def test_exported_weights_load_back_into_real_pytorch(tmp_path: Path):
+    torch.manual_seed(11)
+    model = TinyRanker(17).double()
+    vector = torch.linspace(0, 1, 17, dtype=torch.float64)
+    output = tmp_path / "model.json"
+    export_model(model, output, [f"f{i}" for i in range(17)], "neural")
+    loaded, _ = load_model(output, dtype=torch.float64)
+    assert torch.max(torch.abs(model(vector) - loaded(vector))).item() < 1e-12

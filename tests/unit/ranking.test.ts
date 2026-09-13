@@ -79,6 +79,13 @@ describe("ranking", () => {
     }
   });
 
+  test("production neural ranking is identical for all 120 seed permutations", () => {
+    const permutations = <T,>(items: T[]): T[][] => items.length === 0 ? [[]] : items.flatMap((item, index) => permutations(items.filter((_, candidate) => candidate !== index)).map((rest) => [item, ...rest]));
+    const artifact: ModelArtifact = { version: 1, feature_names: Array.from({ length: 17 }, (_, i) => `f${i}`), activation: "relu", production_ranker: "neural", layers: [{ weight: [Array(17).fill(0.2)], bias: [0] }] };
+    const expected = rankCandidates(seeds, lists, artifact).map(({ mbid, score, features }) => ({ mbid, score, features }));
+    for (const permutation of permutations(seeds)) expect(rankCandidates(permutation, lists, artifact).map(({ mbid, score, features }) => ({ mbid, score, features }))).toEqual(expected);
+  });
+
   test("uses MBID as a stable final tie breaker", () => {
     const tied: Record<string, SimilarTrack[]> = {
       "seed-a": [track("b", "B", 1), track("a", "A", 1)],

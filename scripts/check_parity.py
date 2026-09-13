@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ml.model import TinyRanker, export_model
+from ml.model import TinyRanker, export_model, load_model
 
 
 def main() -> None:
@@ -17,12 +17,10 @@ def main() -> None:
     artifact = json.loads(model_path.read_text())
     rng = random.Random(19)
     vectors = [[rng.random() for _ in range(17)] for _ in range(32)]
-    values = vectors
-    for index, layer in enumerate(artifact["layers"]):
-        values = [[sum(w * x for w, x in zip(row, vector)) + bias for row, bias in zip(layer["weight"], layer["bias"])] for vector in values]
-        if index < len(artifact["layers"]) - 1:
-            values = [[max(0.0, value) for value in vector] for vector in values]
-    python_scores = [value[0] for value in values]
+    model, _ = load_model(model_path)
+    import torch
+    with torch.no_grad():
+        python_scores = model(torch.tensor(vectors, dtype=torch.float64)).tolist()
     with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
         json.dump({"model": artifact, "vectors": vectors}, handle)
         handle.flush()
