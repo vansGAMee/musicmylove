@@ -19,7 +19,7 @@ async function main() {
   }
   const recommendations = createRecommendations(seeds, lists);
   const reordered = createRecommendations([...seeds].reverse(), lists);
-  const actions = [];
+  const actions: string[] = [];
   for (const track of recommendations) {
     const id = await lookupSpotify(track.mbid).catch(() => null);
     actions.push(id ? `https://open.spotify.com/track/${id}` : spotifySearch(track));
@@ -36,6 +36,7 @@ async function main() {
     max_artist_count: Math.max(0, ...artists.values()),
     spotify_actions: actions.length,
     permutation_identical: recommendations.map((track) => track.mbid).join() === reordered.map((track) => track.mbid).join(),
+    playlist: recommendations.map((track, index) => ({ position: index + 1, title: track.title, artist: track.artist, mbid: track.mbid, spotify: actions[index] })),
   };
   console.log(JSON.stringify(summary, null, 2));
   if (summary.result_count < 20 || !summary.no_seeds || !summary.no_duplicates || summary.max_artist_count > 2 || summary.spotify_actions !== summary.result_count || !summary.permutation_identical) process.exitCode = 1;
