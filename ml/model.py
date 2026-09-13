@@ -1,0 +1,37 @@
+import json
+from pathlib import Path
+
+import torch
+from torch import nn
+
+
+class TinyRanker(nn.Module):
+    def __init__(self, feature_count: int = 17):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(feature_count, 16), nn.ReLU(),
+            nn.Linear(16, 8), nn.ReLU(),
+            nn.Linear(8, 1),
+        )
+
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        return self.network(values).squeeze(-1)
+
+
+def export_model(model: TinyRanker, path: Path, feature_names: list[str], production_ranker: str) -> None:
+    layers = []
+    for module in model.network:
+        if isinstance(module, nn.Linear):
+            layers.append({
+                "weight": module.weight.detach().double().tolist(),
+                "bias": module.bias.detach().double().tolist(),
+            })
+    artifact = {
+        "version": 1,
+        "feature_names": feature_names,
+        "activation": "relu",
+        "production_ranker": production_ranker,
+        "layers": layers,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(artifact, indent=2) + "\n")
