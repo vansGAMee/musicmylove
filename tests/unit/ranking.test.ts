@@ -6,6 +6,7 @@ import {
   rankCandidates,
 } from "../../src/lib/ranking";
 import type { SeedTrack, SimilarTrack } from "../../src/lib/types";
+import type { ModelArtifact } from "../../src/lib/mlp";
 
 const seeds: SeedTrack[] = [
   { mbid: "seed-a", title: "A", artist: "Artist A" },
@@ -54,6 +55,17 @@ describe("candidate construction", () => {
 });
 
 describe("ranking", () => {
+  test("uses the production neural artifact rather than hardcoded RRF", () => {
+    const neuralLists: Record<string, SimilarTrack[]> = {
+      "seed-a": [track("x", "Other", 100), track("y", "Artist A", 50)],
+      "seed-b": [], "seed-c": [], "seed-d": [], "seed-e": [],
+    };
+    const artifact: ModelArtifact = {
+      version: 1, feature_names: Array.from({ length: 17 }, (_, i) => `f${i}`), activation: "relu", production_ranker: "neural",
+      layers: [{ weight: [Array.from({ length: 17 }, (_, i) => i === 16 ? 10 : 0)], bias: [0] }],
+    };
+    expect(rankCandidates(seeds, neuralLists, artifact).map((item) => item.mbid)).toEqual(["y", "x"]);
+  });
   test("is identical for all 120 permutations of five seeds", () => {
     const permutations = <T,>(items: T[]): T[][] =>
       items.length === 0

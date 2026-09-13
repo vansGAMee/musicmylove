@@ -6,6 +6,7 @@ import type {
   SeedTrack,
   SimilarityLists,
 } from "./types";
+import { forward, type ModelArtifact } from "./mlp";
 
 const SEED_COUNT = 5;
 const RRF_K = 60;
@@ -96,10 +97,10 @@ function scoreCandidate(features: readonly number[], ranker: RankerName): number
 export function rankCandidates(
   seeds: readonly SeedTrack[],
   lists: SimilarityLists,
-  ranker: RankerName,
+  ranker: RankerName | ModelArtifact,
 ): RankedTrack[] {
   const seedByMbid = new Map(seeds.map((seed) => [seed.mbid, seed]));
-  return mergeCandidates(seeds, lists)
+  const ranked = mergeCandidates(seeds, lists)
     .map((candidate) => {
       const features = buildFeatures(candidate, seeds);
       const pickedFrom = [...candidate.evidence]
@@ -119,10 +120,29 @@ export function rankCandidates(
         release: candidate.release,
         features,
         pickedFrom,
-        score: scoreCandidate(features, ranker),
+        score: 0,
       };
-    })
-    .sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
+    });
+  if (typeof ranker === "string") {
+    ranked.forEach((item) => { item.score = scoreCandidate(item.features, ranker); });
+  } else if (ranker.production_ranker === "max" || ranker.production_ranker === "rrf") {
+    ranked.forEach((item) => { item.score = scoreCandidate(item.features, ranker.production_ranker as RankerName); });
+  } else {
+    const neural = new Map(ranked.map((item) => [item.mbid, forward(item.features, ranker)]));
+    if (ranker.production_ranker === "neural") {
+      ranked.forEach((item) => { item.score = neural.get(item.mbid)!; });
+    } else {
+      const percentile = (score: (item: RankedTrack) => number) => {
+        const ordered = [...ranked].sort((a, b) => score(b) - score(a) || a.mbid.localeCompare(b.mbid));
+        return new Map(ordered.map((item, index) => [item.mbid, ordered.length === 1 ? 1 : 1 - index / (ordered.length - 1)]));
+      };
+      const neuralRanks = percentile((item) => neural.get(item.mbid)!);
+      const rrfRanks = percentile((item) => item.features[10] ?? 0);
+      const alpha = ranker.ensemble_alpha ?? 0.5;
+      ranked.forEach((item) => { item.score = alpha * neuralRanks.get(item.mbid)! + (1 - alpha) * rrfRanks.get(item.mbid)!; });
+    }
+  }
+  return ranked.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
 }
 
 export function diversify(

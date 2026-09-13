@@ -3,7 +3,8 @@ export interface ModelArtifact {
   version: number;
   feature_names: string[];
   activation: "relu";
-  production_ranker: "max" | "rrf" | "neural";
+  production_ranker: "max" | "rrf" | "neural" | "ensemble";
+  ensemble_alpha?: number | null;
   layers: DenseLayer[];
 }
 
