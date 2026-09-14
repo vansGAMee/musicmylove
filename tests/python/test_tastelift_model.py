@@ -17,7 +17,7 @@ def dataset():
                "popularity": {"percentile": i / 210}} for i in range(210)]
     return {"tracks": tracks, "episodes": [{"partition": "train", "user_key": "a",
             "seed_ids": [str(i) for i in range(5)], "positive_id": "6", "negative_id": "7",
-            "positive_band": 0, "negative_band": 0}]}
+            "positive_band": 0, "negative_band": 0, "negative_source": "retrieval"}]}
 
 
 def model(seed=41):
@@ -108,3 +108,49 @@ def test_resume_matches_uninterrupted_training_and_scratch_ignores_checkpoint(tm
     scratch = lib.train_model(dataset(), epochs=1, checkpoint_dir=tmp_path, batch_size=1, seed=3)
     assert all(torch.equal(p, q) for p, q in zip(resumed.parameters(), full.parameters()))
     assert all(torch.equal(p, q) for p, q in zip(first.parameters(), scratch.parameters()))
+
+
+def test_trainer_only_counts_popularity_matched_retrieval_negatives(tmp_path):
+    lib = api()
+    row = dataset()["episodes"][0]
+    data = dataset()
+    data["episodes"] = [
+        {**row, "partition": "train", "negative_source": "retrieval"},
+        {**row, "partition": "train", "negative_source": "corpus"},
+        {**row, "partition": "train", "negative_source": "retrieval", "negative_band": 1},
+        {**row, "partition": "validation", "negative_source": "retrieval"},
+        {**row, "partition": "validation", "negative_source": "corpus"},
+        {**row, "partition": "validation", "negative_source": "retrieval", "negative_band": 1},
+    ]
+    trained = lib.train_model(data, epochs=1, checkpoint_dir=tmp_path, batch_size=1, seed=3)
+    assert trained.training_summary["train_pairs"] == 1
+    assert trained.training_summary["validation_pairs"] == 1
+    assert trained.training_summary["config"]["negative_source"] == "retrieval"
+
+
+def test_resume_rejects_effective_torch_thread_mismatch(tmp_path):
+    lib = api()
+    original_threads = torch.get_num_threads()
+    try:
+        torch.set_num_threads(1)
+        lib.train_model(dataset(), epochs=1, checkpoint_dir=tmp_path, batch_size=1, seed=3)
+        torch.set_num_threads(2)
+        with pytest.raises(ValueError, match="training configuration mismatch"):
+            lib.train_model(dataset(), epochs=2, checkpoint_dir=tmp_path, batch_size=1, seed=3, resume=True)
+    finally:
+        torch.set_num_threads(original_threads)
+
+
+def test_require_kitty_rejects_absence_and_records_injected_provenance(tmp_path, capsys):
+    lib = api()
+    with pytest.raises(ValueError, match="Kitty"):
+        lib.train_model(dataset(), epochs=1, checkpoint_dir=tmp_path / "absent", batch_size=1,
+                        require_kitty=True, execution_environment={})
+    trained = lib.train_model(dataset(), epochs=1, checkpoint_dir=tmp_path / "present", batch_size=1,
+                              require_kitty=True,
+                              execution_environment={"KITTY_WINDOW_ID": "42", "KITTY_PID": "99"})
+    expected = {"runner": "kitty", "kitty_window_id": "42", "kitty_pid": "99"}
+    assert trained.training_summary["execution"] == expected
+    starts = [json.loads(line) for line in capsys.readouterr().out.splitlines()
+              if json.loads(line).get("event") == "start"]
+    assert starts[-1]["execution"] == expected

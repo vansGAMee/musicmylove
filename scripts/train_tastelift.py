@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--device", choices=["cpu", "cuda"])
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--require-kitty", action="store_true",
+                        help="reject execution outside a Kitty window and record Kitty provenance")
     parser.add_argument("--max-train-rows", type=int)
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
@@ -37,7 +39,8 @@ def main():
         raise ValueError("TasteLift requires rebuilt dataset version 2")
     model = train_model(dataset, epochs=args.epochs, checkpoint_dir=args.checkpoint_dir,
                         batch_size=args.batch_size, seed=args.seed, resume=args.resume,
-                        device=args.device, max_train_rows=args.max_train_rows, patience=args.patience)
+                        device=args.device, max_train_rows=args.max_train_rows, patience=args.patience,
+                        require_kitty=args.require_kitty)
     best = torch.load(args.checkpoint_dir / "best.pt", map_location="cpu", weights_only=False)
     model.load_state_dict(best["model"])
     model.training_summary["selected_epoch"] = best["epoch"]

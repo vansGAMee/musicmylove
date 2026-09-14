@@ -205,9 +205,18 @@ def _save_checkpoint(path, payload):
         Path(temporary).unlink(missing_ok=True)
 
 
+def _execution_provenance(require_kitty, environment):
+    environment = os.environ if environment is None else environment
+    window_id = environment.get("KITTY_WINDOW_ID")
+    if require_kitty and not window_id:
+        raise ValueError("--require-kitty must run inside a Kitty window")
+    return {"runner": "kitty" if window_id else "unverified",
+            "kitty_window_id": window_id, "kitty_pid": environment.get("KITTY_PID")}
+
+
 def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/checkpoints"),
                 batch_size=64, seed=41, resume=False, device=None, max_train_rows=None, learning_rate=0.002,
-                patience=8):
+                patience=8, require_kitty=False, execution_environment=None):
     """Scratch by default; deterministic epoch-boundary resume with optimizer/RNG.
 
     Only train and validation episodes are consumed. Selection uses validation
@@ -220,19 +229,23 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
     torch.manual_seed(seed)
     random.seed(seed)
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    execution = _execution_provenance(require_kitty, execution_environment)
     model = TasteLift.from_dataset(dataset, seed=seed).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.001)
-    rows = [row for row in dataset["episodes"] if row["partition"] == "train" and row["positive_band"] == row["negative_band"]]
-    validation = [row for row in dataset["episodes"] if row["partition"] == "validation"]
+    eligible = lambda row, partition: (row["partition"] == partition
+        and row["positive_band"] == row["negative_band"] and row.get("negative_source") == "retrieval")
+    rows = [row for row in dataset["episodes"] if eligible(row, "train")]
+    validation = [row for row in dataset["episodes"] if eligible(row, "validation")]
     if max_train_rows:
         rows, validation = rows[:max_train_rows], validation[:max_train_rows]
     if not rows:
-        raise ValueError("no popularity-matched training pairs")
+        raise ValueError("no popularity-matched retrieval hard-negative training pairs")
     # Include metadata and every consumed episode to prevent incompatible resume.
     signature = hashlib.sha256(json.dumps({"tracks": dataset["tracks"], "train": rows,
         "validation": validation}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     config = {"seed": seed, "batch_size": batch_size, "learning_rate": learning_rate,
-              "device": device, "signature": signature, "patience": patience}
+              "device": device, "threads": torch.get_num_threads(), "signature": signature,
+              "patience": patience, "negative_source": "retrieval"}
     directory = Path(checkpoint_dir)
     directory.mkdir(parents=True, exist_ok=True)
     last_path, best_path = directory / "last.pt", directory / "best.pt"
@@ -248,7 +261,8 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
             torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])
         start, history, best = checkpoint["epoch"], checkpoint["history"], checkpoint["best"]
     print(json.dumps({"event": "start", "device": device, "initialization": "resume" if resume else "scratch",
-          "start_epoch": start, "train_pairs": len(rows), "validation_pairs": len(validation), "config": config}), flush=True)
+          "start_epoch": start, "train_pairs": len(rows), "validation_pairs": len(validation),
+          "config": config, "execution": execution}), flush=True)
     for epoch in range(start, epochs):
         model.train()
         order = list(range(len(rows)))
@@ -294,5 +308,6 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
             print(json.dumps({"event": "early_stop", "epoch": epoch + 1, "best_epoch": best_epoch}), flush=True)
             break
     model.training_summary = {"config": config, "history": history, "selection": "best-validation-bpr",
-                              "initialization": "scratch", "train_pairs": len(rows), "validation_pairs": len(validation)}
+                              "initialization": "scratch", "execution": execution,
+                              "train_pairs": len(rows), "validation_pairs": len(validation)}
     return model
