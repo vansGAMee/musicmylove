@@ -4,7 +4,7 @@ import type { SimilarTrack, Track } from "../types";
 import type { ResolvedTasteSeed } from "./resolver";
 import { hasSameRecordingIdentity, recordingIdentity } from "./identity";
 
-export type TasteCandidateSource = "listenbrainz";
+export type TasteCandidateSource = "listenbrainz" | "tastelift-catalog";
 
 export interface TasteCandidateEvidence {
   source: TasteCandidateSource;

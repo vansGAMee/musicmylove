@@ -24,6 +24,37 @@ export class TasteInputError extends Error {
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const normalizeText = (value: string) => value.normalize("NFKC").replace(/\s+/gu, " ").trim();
 
+function spotifyHistorySongs(value: readonly unknown[]): Record<string, unknown>[] {
+  const aggregated = new Map<string, { row: Record<string, unknown>; playTime: number; plays: number; first: number }>();
+  value.forEach((entry, index) => {
+    if (!object(entry)) return;
+    const artistValue = entry.master_metadata_album_artist_name ?? entry.artistName ?? entry.artist;
+    const titleValue = entry.master_metadata_track_name ?? entry.trackName ?? entry.title;
+    if (typeof artistValue !== "string" || typeof titleValue !== "string" || !normalizeText(artistValue) || !normalizeText(titleValue)) return;
+    const artist = normalizeText(artistValue);
+    const title = normalizeText(titleValue);
+    const uri = typeof entry.spotify_track_uri === "string" ? entry.spotify_track_uri : "";
+    const spotifyId = /^spotify:track:([A-Za-z0-9]{22})$/u.exec(uri)?.[1];
+    const spotifyUrl = spotifyId ? `https://open.spotify.com/track/${spotifyId}` : entry.spotify_url;
+    const row = { artist, title, ...(typeof spotifyUrl === "string" ? { spotify_url: spotifyUrl } : {}) };
+    const key = tasteSeedKey(row);
+    const duration = entry.ms_played ?? entry.msPlayed;
+    const playTime = typeof duration === "number" && Number.isFinite(duration) ? Math.max(0, duration) : 1;
+    const previous = aggregated.get(key);
+    if (previous) {
+      previous.playTime += playTime;
+      previous.plays += 1;
+      if (!previous.row.spotify_url && row.spotify_url) previous.row = row;
+    } else {
+      aggregated.set(key, { row, playTime, plays: 1, first: index });
+    }
+  });
+  return [...aggregated.values()]
+    .sort((left, right) => right.playTime - left.playTime || right.plays - left.plays || left.first - right.first)
+    .slice(0, 500)
+    .map((item) => item.row);
+}
+
 function parseSpotifyUrl(value: unknown, path: string): Pick<TasteSeedInput, "spotifyUrl" | "spotifyId"> | TasteInputIssue | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") return { path, code: "invalid_type", message: `${path} must be a Spotify track URL` };
@@ -46,17 +77,19 @@ export function tasteSeedKey(seed: Pick<TasteSeedInput, "artist" | "title">): st
 
 /** Validates canonical JSON input and removes only exact normalized artist/title duplicates in input order. */
 export function parseTasteInput(value: unknown): TasteSeedInput[] {
-  if (!object(value) || !Array.isArray(value.songs)) {
+  const fromHistory = Array.isArray(value);
+  const songs = fromHistory ? spotifyHistorySongs(value) : object(value) && Array.isArray(value.songs) ? value.songs : undefined;
+  if (!songs) {
     throw new TasteInputError([{ path: "songs", code: "invalid_type", message: "songs must be an array" }]);
   }
-  if (value.songs.length < 5 || value.songs.length > 500) {
+  if (songs.length < 5 || (!fromHistory && songs.length > 500)) {
     throw new TasteInputError([{ path: "songs", code: "out_of_range", message: "songs must contain between 5 and 500 entries" }]);
   }
 
   const issues: TasteInputIssue[] = [];
   const seeds: TasteSeedInput[] = [];
   const seen = new Set<string>();
-  for (const [index, row] of value.songs.entries()) {
+  for (const [index, row] of songs.entries()) {
     const path = `songs[${index}]`;
     if (!object(row)) {
       issues.push({ path, code: "invalid_type", message: `${path} must be an object` });

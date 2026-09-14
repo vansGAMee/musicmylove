@@ -28,10 +28,15 @@ test("returns structured unresolved seed failures as 422", async () => {
   });
 });
 
-test("returns 200 while retaining a valid text/OOV seed", async () => {
+test("returns the real forty-track pipeline result while retaining valid text/OOV seeds", async () => {
+  const recommendations = Array.from({ length: 40 }, (_, index) => ({
+    mbid: `candidate-${index}`, artist: `Candidate Artist ${index}`, title: `Candidate ${index}`,
+    score: 1 - index / 100, features: Array(17).fill(0), pickedFrom: [], tasteHeadIndex: index % 4,
+    seedSupport: 2, popularityPercentile: 0.2, liftScore: 0.5,
+  }));
   const response = await handleTasteLiftPost(new Request("https://example.test/api/tastelift", { method: "POST", body: JSON.stringify(body) }), {
-    resolveTasteSeeds: async (inputs): Promise<ResolvedTasteSeed[]> => [{
-      input: inputs[0]!,
+    resolveTasteSeeds: async (inputs): Promise<ResolvedTasteSeed[]> => inputs.map((input) => ({
+      input,
       status: "resolved",
       source: "text",
       diagnostic: {
@@ -39,19 +44,20 @@ test("returns 200 while retaining a valid text/OOV seed", async () => {
         code: "no_exact_mbid",
         message: "No exact MusicBrainz recording found",
       },
-    }],
+    })),
+    recommendTasteSeeds: async () => ({ candidateCount: 500, recommendations }),
   });
   expect(response.status).toBe(200);
-  await expect(response.json()).resolves.toEqual({
-    seeds: [{
-      input: body.songs[0],
-      status: "resolved",
-      source: "text",
-      diagnostic: {
-        status: "retrieval_unavailable",
-        code: "no_exact_mbid",
-        message: "No exact MusicBrainz recording found",
-      },
-    }],
+  const payload = await response.json();
+  expect(payload.seeds).toHaveLength(5);
+  expect(payload.candidateCount).toBe(500);
+  expect(payload.recommendations).toHaveLength(40);
+  expect(payload.recommendations[0]).toMatchObject({
+    score: 1,
+    strongestTasteHead: 0,
+    seedSupport: 2,
+    popularityPercentile: 0.2,
+    noveltyLiftScore: 0.5,
+    spotifyLink: expect.stringContaining("open.spotify.com/search/"),
   });
 });

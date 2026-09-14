@@ -171,22 +171,28 @@ export class TasteLiftModel {
     });
   }
 
-  scoreCandidates(seeds: readonly TasteLiftTrack[], candidates: readonly TasteLiftTrack[]): TasteLiftSetScore {
-    const heads = this.encodeSet(seeds);
-    const { architecture, popularity, weights } = this.artifact;
+  scoreEncodedCandidate(heads: readonly (readonly number[])[], vector: readonly number[], popularityPercentile: number): TasteLiftCandidateScore {
+    const { architecture, weights } = this.artifact;
+    if (heads.length !== architecture.heads || vector.length !== architecture.dim) throw new Error("TasteLift encoded candidate dimensions are invalid");
     const scale = softplus(weights.log_score_scale);
     const popularityWeight = softplus(weights.log_popularity_weight);
+    const perHeadScores = heads.map((head) => dot(head, vector) * scale);
+    const strongestHead = Math.max(...perHeadScores);
+    const strongestHeadIndex = perHeadScores.findIndex((score) => score === strongestHead);
+    const affinity = architecture.affinity_temperature * logSumExp(perHeadScores.map((score) => score / architecture.affinity_temperature));
+    const popularityPrior = popularityWeight * popularityPercentile;
+    return { perHeadScores, affinity, popularityPrior, lift: affinity - popularityPrior, strongestHead, strongestHeadIndex, popularityPercentile };
+  }
+
+  scoreCandidates(seeds: readonly TasteLiftTrack[], candidates: readonly TasteLiftTrack[]): TasteLiftSetScore {
+    const heads = this.encodeSet(seeds);
+    const { popularity } = this.artifact;
     return {
       heads,
       candidates: candidates.map((candidate) => {
         const vector = this.encodeTrack(candidate);
-        const perHeadScores = heads.map((head) => dot(head, vector) * scale);
-        const strongestHead = Math.max(...perHeadScores);
-        const strongestHeadIndex = perHeadScores.findIndex((score) => score === strongestHead);
-        const affinity = architecture.affinity_temperature * logSumExp(perHeadScores.map((score) => score / architecture.affinity_temperature));
         const popularityPercentile = candidate.popularityPercentile ?? (candidate.mbid ? popularity[candidate.mbid] : undefined) ?? 0;
-        const popularityPrior = popularityWeight * popularityPercentile;
-        return { perHeadScores, affinity, popularityPrior, lift: affinity - popularityPrior, strongestHead, strongestHeadIndex, popularityPercentile };
+        return this.scoreEncodedCandidate(heads, vector, popularityPercentile);
       }),
     };
   }

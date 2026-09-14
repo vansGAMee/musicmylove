@@ -20,7 +20,7 @@ export interface SeedEvidence {
   /** Retained when this evidence originated in a TasteCandidatePool. */
   seedIndex?: number;
   recordingMbid?: string;
-  source?: "listenbrainz";
+  source?: "listenbrainz" | "tastelift-catalog";
 }
 
 export interface CandidateEvidence extends Track {

@@ -52,3 +52,27 @@ test("deduplicates only identical normalized artist-title pairs in first-seen or
     song(2), song(3), song(4),
   ]);
 });
+
+test("accepts Spotify extended-history JSON and promotes the most-played distinct tracks", () => {
+  const history = [
+    { master_metadata_album_artist_name: "Rare Artist", master_metadata_track_name: "Deep Cut", spotify_track_uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC", ms_played: 20_000 },
+    { master_metadata_album_artist_name: "Main Artist", master_metadata_track_name: "Hit", spotify_track_uri: "spotify:track:0VjIjW4GlUZAMYd2vXMi3b", ms_played: 5_000 },
+    { master_metadata_album_artist_name: "Rare Artist", master_metadata_track_name: "Deep Cut", spotify_track_uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC", ms_played: 30_000 },
+    ...Array.from({ length: 4 }, (_, index) => ({ master_metadata_album_artist_name: `Artist ${index}`, master_metadata_track_name: `Song ${index}`, ms_played: 10_000 - index })),
+    { episode_name: "Podcast", ms_played: 999_999 },
+  ];
+
+  const parsed = parseTasteInput(history);
+
+  expect(parsed).toHaveLength(6);
+  expect(parsed[0]).toEqual({ artist: "Rare Artist", title: "Deep Cut", spotifyUrl: "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", spotifyId: "4uLU6hMCjMI75M1A2tKUQC" });
+  expect(parsed.filter((track) => track.artist === "Rare Artist")).toHaveLength(1);
+});
+
+test("reduces histories larger than the serving bound to their 500 strongest distinct tracks", () => {
+  const history = Array.from({ length: 501 }, (_, index) => ({ artistName: `Artist ${index}`, trackName: `Song ${index}`, msPlayed: index + 1 }));
+  const parsed = parseTasteInput(history);
+  expect(parsed).toHaveLength(500);
+  expect(parsed[0]).toEqual({ artist: "Artist 500", title: "Song 500" });
+  expect(parsed.some((track) => track.artist === "Artist 0")).toBe(false);
+});
