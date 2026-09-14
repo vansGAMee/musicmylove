@@ -1,19 +1,27 @@
 import { fetchWithRetry } from "../http";
 import { searchRecordingsForSeed } from "../listenbrainz";
 import type { Track } from "../types";
-import type { TasteSeedInput } from "./input";
+import { tasteSeedKey, type TasteSeedInput } from "./input";
+import { VersionedCache } from "../cache";
 
 export interface TasteResolverAdapters {
   searchRecordings: (query: string) => Promise<Track[]>;
   resolveLastFm?: (input: TasteSeedInput) => Promise<Track | null>;
+  cache?: VersionedCache<ResolvedTasteSeed>;
 }
 
-export interface ResolvedTasteSeed {
+export interface MbidResolvedTasteSeed {
   input: TasteSeedInput;
   status: "resolved";
-  source: "listenbrainz" | "lastfm" | "text";
-  track?: Track;
-  diagnostic?: {
+  source: "listenbrainz" | "lastfm";
+  track: Track;
+}
+
+export interface TextResolvedTasteSeed {
+  input: TasteSeedInput;
+  status: "resolved";
+  source: "text";
+  diagnostic: {
     status: "retrieval_unavailable";
     code: "no_exact_mbid";
     message: string;
@@ -24,18 +32,43 @@ export interface UnresolvedTasteSeed {
   input: TasteSeedInput;
   status: "unresolved";
   error: {
-    code: "not_found" | "upstream_error";
+    code: "upstream_error";
     message: string;
   };
 }
 
-export type TasteSeedResolution = ResolvedTasteSeed | UnresolvedTasteSeed;
+/** Every requested seed is returned as an MBID, text/OOV, or structured failure outcome. */
+export type ResolvedTasteSeed = MbidResolvedTasteSeed | TextResolvedTasteSeed | UnresolvedTasteSeed;
+export type TasteSeedResolution = ResolvedTasteSeed;
+
+export interface TasteResolverOptions {
+  cache?: VersionedCache<ResolvedTasteSeed>;
+  maxConcurrency?: number;
+  cacheTtlMs?: number;
+}
+
+export class LastFmResponseError extends Error {
+  constructor(public readonly code: number | string, message: string) {
+    super(`Last.fm error ${code}: ${message}`);
+    this.name = "LastFmResponseError";
+  }
+}
+
+const resolverStorage = new Map<string, string>();
+const resolverCache = new VersionedCache<ResolvedTasteSeed>("tastelift-resolver-v1", {
+  getItem: (key) => resolverStorage.get(key) ?? null,
+  setItem: (key, value) => resolverStorage.set(key, value),
+});
+const DEFAULT_CONCURRENCY = 8;
+const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000;
 
 const key = (value: string) => value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("en-US");
 const queryFor = (input: TasteSeedInput) => `${input.artist} ${input.title}`;
 
 function exactMatch(input: TasteSeedInput, tracks: readonly Track[]): Track | null {
-  return tracks.find((track) => key(track.artist) === key(input.artist) && key(track.title) === key(input.title)) ?? null;
+  return tracks
+    .filter((track) => key(track.artist) === key(input.artist) && key(track.title) === key(input.title))
+    .sort((left, right) => left.mbid < right.mbid ? -1 : left.mbid > right.mbid ? 1 : 0)[0] ?? null;
 }
 
 function upstreamError(input: TasteSeedInput, error: unknown): UnresolvedTasteSeed {
@@ -46,39 +79,72 @@ function upstreamError(input: TasteSeedInput, error: unknown): UnresolvedTasteSe
   };
 }
 
-export async function resolveTasteSeeds(inputs: readonly TasteSeedInput[], adapters: TasteResolverAdapters): Promise<TasteSeedResolution[]> {
-  return Promise.all(inputs.map(async (input): Promise<TasteSeedResolution> => {
+function withInput(input: TasteSeedInput, result: ResolvedTasteSeed): ResolvedTasteSeed {
+  return { ...result, input };
+}
+
+async function resolveTasteSeed(input: TasteSeedInput, adapters: TasteResolverAdapters): Promise<ResolvedTasteSeed> {
+  try {
+    const listenBrainzMatch = exactMatch(input, await adapters.searchRecordings(queryFor(input)));
+    if (listenBrainzMatch) return { input, status: "resolved", track: listenBrainzMatch, source: "listenbrainz" };
+  } catch (error) {
+    return upstreamError(input, error);
+  }
+
+  if (adapters.resolveLastFm) {
     try {
-      const listenBrainzMatch = exactMatch(input, await adapters.searchRecordings(queryFor(input)));
-      if (listenBrainzMatch) return { input, status: "resolved", track: listenBrainzMatch, source: "listenbrainz" };
+      const lastFmMatch = await adapters.resolveLastFm(input);
+      if (lastFmMatch && exactMatch(input, [lastFmMatch])) return { input, status: "resolved", track: lastFmMatch, source: "lastfm" };
     } catch (error) {
       return upstreamError(input, error);
     }
-
-    if (adapters.resolveLastFm) {
-      try {
-        const lastFmMatch = await adapters.resolveLastFm(input);
-        if (lastFmMatch && exactMatch(input, [lastFmMatch])) return { input, status: "resolved", track: lastFmMatch, source: "lastfm" };
-      } catch (error) {
-        return upstreamError(input, error);
-      }
-    }
-    return {
-      input,
-      status: "resolved",
-      source: "text",
-      diagnostic: {
-        status: "retrieval_unavailable",
-        code: "no_exact_mbid",
-        message: `No exact MusicBrainz recording found for ${input.artist} — ${input.title}`,
-      },
-    };
-  }));
+  }
+  return {
+    input,
+    status: "resolved",
+    source: "text",
+    diagnostic: {
+      status: "retrieval_unavailable",
+      code: "no_exact_mbid",
+      message: `No exact MusicBrainz recording found for ${input.artist} — ${input.title}`,
+    },
+  };
 }
 
-function parseLastFmTrack(value: unknown): Track | null {
+async function mapWithConcurrency<T, R>(values: readonly T[], maxConcurrency: number, mapper: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await mapper(values[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, maxConcurrency), values.length) }, worker));
+  return results;
+}
+
+export async function resolveTasteSeeds(inputs: readonly TasteSeedInput[], adapters: TasteResolverAdapters, options: TasteResolverOptions = {}): Promise<ResolvedTasteSeed[]> {
+  const cache = options.cache ?? adapters.cache;
+  const ttlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  return mapWithConcurrency(inputs, options.maxConcurrency ?? DEFAULT_CONCURRENCY, async (input) => {
+    const cacheKey = tasteSeedKey(input);
+    const cached = cache?.get(cacheKey);
+    if (cached && !cached.stale) return withInput(input, cached.value);
+    const result = await resolveTasteSeed(input, adapters);
+    if (result.status === "resolved") cache?.set(cacheKey, result, ttlMs);
+    return result;
+  });
+}
+
+export function parseLastFmTrack(value: unknown): Track | null {
   if (typeof value !== "object" || value === null) return null;
-  const track = (value as Record<string, unknown>).track;
+  const response = value as Record<string, unknown>;
+  if (typeof response.error === "number" || typeof response.error === "string" || (typeof response.message === "string" && response.track === undefined)) {
+    const code = typeof response.error === "number" || typeof response.error === "string" ? response.error : "unknown";
+    throw new LastFmResponseError(code, typeof response.message === "string" ? response.message : "Last.fm returned an error response");
+  }
+  const track = response.track;
   if (typeof track !== "object" || track === null) return null;
   const row = track as Record<string, unknown>;
   const artist = typeof row.artist === "object" && row.artist !== null && typeof (row.artist as Record<string, unknown>).name === "string" ? (row.artist as Record<string, string>).name : null;
@@ -88,6 +154,7 @@ function parseLastFmTrack(value: unknown): Track | null {
 export function createTasteResolverAdapters(lastFmApiKey = process.env.LASTFM_API_KEY): TasteResolverAdapters {
   return {
     searchRecordings: (query) => searchRecordingsForSeed(query),
+    cache: resolverCache,
     ...(lastFmApiKey ? {
       resolveLastFm: async (input: TasteSeedInput): Promise<Track | null> => {
         const url = new URL("https://ws.audioscrobbler.com/2.0/");

@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { parseSearch } from "../../src/lib/listenbrainz";
-import { resolveTasteSeeds, type TasteResolverAdapters } from "../../src/lib/tastelift/resolver";
+import { LastFmResponseError, parseLastFmTrack, resolveTasteSeeds, type ResolvedTasteSeed, type TasteResolverAdapters } from "../../src/lib/tastelift/resolver";
 import type { TasteSeedInput } from "../../src/lib/tastelift/input";
+import { VersionedCache } from "../../src/lib/cache";
 
 const inputs: TasteSeedInput[] = [
   { artist: "Project Dumb", title: "An Italian Magician Be Like" },
@@ -41,6 +42,18 @@ test("uses an exact ListenBrainz recording identity when available", async () =>
     track: { mbid: "a1b2c3d4-e5f6-7890-a1b2-c3d4e5f67890", artist: "Exact Artist", title: "Exact Song", release: "Exact Album" },
     source: "listenbrainz",
   }]);
+});
+
+test("chooses the same lowest MBID exact match regardless of upstream row order", async () => {
+  const exactInput: TasteSeedInput = { artist: "Exact Artist", title: "Exact Song" };
+  const matches = [
+    { mbid: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", artist: "Exact Artist", title: "Exact Song" },
+    { mbid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", artist: "Exact Artist", title: "Exact Song" },
+  ];
+  const forward = await resolveTasteSeeds([exactInput], { searchRecordings: async () => matches });
+  const reverse = await resolveTasteSeeds([exactInput], { searchRecordings: async () => [...matches].reverse() });
+  expect(forward[0]).toMatchObject({ source: "listenbrainz", track: { mbid: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" } });
+  expect(reverse[0]).toEqual(forward[0]);
 });
 
 test("returns one deterministic result per input without silently losing text-only seeds", async () => {
@@ -118,4 +131,49 @@ test("reports upstream failures per seed without losing neighboring seeds", asyn
     status: "unresolved",
     error: { code: "upstream_error", message: "upstream unavailable" },
   });
+});
+
+test("treats a Last.fm HTTP-200 error payload as a typed upstream failure", async () => {
+  expect(() => parseLastFmTrack({ error: 6, message: "Track not found" })).toThrow(LastFmResponseError);
+  expect(() => parseLastFmTrack({ message: "Rate limit exceeded" })).toThrow(LastFmResponseError);
+  const [result] = await resolveTasteSeeds([inputs[1]], {
+    searchRecordings: async () => [],
+    resolveLastFm: async () => { throw new LastFmResponseError(6, "Track not found"); },
+  });
+  expect(result).toEqual({
+    input: inputs[1],
+    status: "unresolved",
+    error: { code: "upstream_error", message: "Last.fm error 6: Track not found" },
+  });
+});
+
+test("bounds adapter concurrency and caches resolved seed outcomes", async () => {
+  const storage = new Map<string, string>();
+  const cache = new VersionedCache<ResolvedTasteSeed>("tastelift-resolver-test", { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) });
+  const batch = Array.from({ length: 6 }, (_, index): TasteSeedInput => ({ artist: `Artist ${index}`, title: `Song ${index}` }));
+  let active = 0;
+  let maximumActive = 0;
+  let calls = 0;
+  const adapters: TasteResolverAdapters = {
+    searchRecordings: async () => {
+      calls++;
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return [];
+    },
+    resolveLastFm: async () => {
+      calls++;
+      active++;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      return null;
+    },
+  };
+  await resolveTasteSeeds(batch, adapters, { cache, maxConcurrency: 2 });
+  expect(maximumActive).toBeLessThanOrEqual(2);
+  await resolveTasteSeeds(batch, adapters, { cache, maxConcurrency: 2 });
+  expect(calls).toBe(12);
 });
