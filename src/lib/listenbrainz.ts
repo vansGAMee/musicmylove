@@ -23,5 +23,32 @@ export async function searchRecordings(query: string, signal?: AbortSignal) { re
 /** Searches ListenBrainz with the same artist/title query used by TasteLift seed resolution. */
 export async function searchRecordingsForSeed(query: string, signal?: AbortSignal) { return searchRecordings(query, signal); }
 export async function fetchSimilar(mbid: string, signal?: AbortSignal) { return parseSimilar(await json(`${LABS}/similar-recordings/json?recording_mbids=${encodeURIComponent(mbid)}&algorithm=${encodeURIComponent(SIMILARITY_ALGORITHM)}`, signal)); }
+/** Parses the Labs batched similarity response while keeping upstream rank order per reference MBID. */
+export function parseSimilarBatch(value: unknown): Record<string, SimilarTrack[]> {
+  if (!Array.isArray(value)) throw new Error("Malformed batched similarity response");
+  const lists: Record<string, SimilarTrack[]> = {};
+  for (const row of value) {
+    if (!object(row) || typeof row.reference_mbid !== "string" || typeof row.recording_mbid !== "string" || typeof row.recording_name !== "string" || typeof row.artist_credit_name !== "string" || typeof row.score !== "number") continue;
+    (lists[row.reference_mbid] ??= []).push({
+      mbid: row.recording_mbid,
+      title: row.recording_name,
+      artist: row.artist_credit_name,
+      ...(typeof row.release_name === "string" ? { release: row.release_name } : {}),
+      score: row.score,
+    });
+  }
+  return lists;
+}
+/** Fetches many similarity lists in one bounded-retry ListenBrainz request. */
+export async function fetchSimilarBatch(mbids: readonly string[], signal?: AbortSignal): Promise<Record<string, SimilarTrack[]>> {
+  if (mbids.length === 0) return {};
+  const response = await fetchWithRetry(`${LABS}/similar-recordings/json`, {
+    method: "POST",
+    signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify([{ recording_mbids: [...new Set(mbids)].sort((left, right) => left.localeCompare(right)), algorithm: SIMILARITY_ALGORITHM }]),
+  });
+  return parseSimilarBatch(await response.json());
+}
 export async function lookupSpotify(mbid: string, signal?: AbortSignal) { return parseSpotify(await json(`${LABS}/spotify-id-from-mbid/json?recording_mbid=${encodeURIComponent(mbid)}`, signal)); }
 export function spotifySearch(track: Track) { return `https://open.spotify.com/search/${encodeURIComponent(`${track.artist} ${track.title}`)}`; }
