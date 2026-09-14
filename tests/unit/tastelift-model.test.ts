@@ -35,4 +35,12 @@ describe("TasteLiftModel", () => {
     const model = TasteLiftModel.fromArtifact(artifact);
     expect(() => model.encodeSet(seeds.slice(0, 4))).toThrow(/5 to 200/i);
   });
+
+  test("accepts exactly two hundred seeds and scores an empty candidate set", () => {
+    const model = TasteLiftModel.fromArtifact(artifact);
+    const twoHundred = Array.from({ length: 200 }, (_, index) => ({ mbid: `seed-${String(index).padStart(3, "0")}`, artist: `Artist ${index}`, title: `Title ${index}` }));
+    const score = model.scoreCandidates(twoHundred, []);
+    expect(score.heads).toHaveLength(4);
+    expect(score.candidates).toEqual([]);
+  });
 });

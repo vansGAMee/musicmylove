@@ -8,7 +8,9 @@ import type {
 } from "./types";
 import { legacyResidualScore, type ModelArtifact } from "./mlp";
 import { buildTasteLiftRankingFields, tasteLiftContribution } from "./tastelift/features";
-import type { TasteLiftModel } from "./tastelift/model";
+import type { TasteLiftModel, TasteLiftTrack } from "./tastelift/model";
+import type { TasteCandidatePool } from "./tastelift/retrieval";
+import type { UnresolvedTasteSeed } from "./tastelift/resolver";
 
 const SEED_COUNT = 5;
 const RRF_K = 60;
@@ -99,14 +101,14 @@ function scoreCandidate(features: readonly number[], ranker: RankerName): number
   return features[10] ?? 0;
 }
 
-export function rankCandidates(
+function rankEvidenceCandidates(
   seeds: readonly SeedTrack[],
-  lists: SimilarityLists,
+  candidates: readonly CandidateEvidence[],
   ranker: RankerName | ModelArtifact,
   tasteLift?: TasteLiftModel,
+  tasteSeeds: readonly TasteLiftTrack[] = seeds,
 ): RankedTrack[] {
   const seedByMbid = new Map(seeds.map((seed) => [seed.mbid, seed]));
-  const candidates = mergeCandidates(seeds, lists);
   const ranked: RankedTrack[] = candidates
     .map((candidate) => {
       const features = buildFeatures(candidate, seeds);
@@ -150,15 +152,81 @@ export function rankCandidates(
     }
   }
   if (tasteLift) {
-    const fields = buildTasteLiftRankingFields(tasteLift, seeds, candidates);
+    const fields = buildTasteLiftRankingFields(tasteLift, tasteSeeds, candidates);
     ranked.forEach((item) => {
       const taste = fields.get(item.mbid)!;
       item.residualScore = item.score;
       Object.assign(item, taste);
-      item.score += tasteLiftContribution(taste, seeds.length);
+      item.score += tasteLiftContribution(taste, tasteSeeds.length);
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
+}
+
+export function rankCandidates(
+  seeds: readonly SeedTrack[],
+  lists: SimilarityLists,
+  ranker: RankerName | ModelArtifact,
+  tasteLift?: TasteLiftModel,
+): RankedTrack[] {
+  return rankEvidenceCandidates(seeds, mergeCandidates(seeds, lists), ranker, tasteLift);
+}
+
+export class TasteLiftPoolInputError extends Error {
+  constructor(readonly failures: readonly UnresolvedTasteSeed[]) {
+    super("TasteLift candidate pool contains unresolved seeds");
+    this.name = "TasteLiftPoolInputError";
+  }
+}
+
+function poolSeeds(pool: TasteCandidatePool): { featureSeeds: SeedTrack[]; tasteSeeds: TasteLiftTrack[] } {
+  const failures = pool.seeds.filter((seed): seed is UnresolvedTasteSeed => seed.status === "unresolved");
+  if (failures.length) throw new TasteLiftPoolInputError(failures);
+  const tasteSeeds: TasteLiftTrack[] = [];
+  const featureSeeds: SeedTrack[] = [];
+  pool.seeds.forEach((seed, index) => {
+    if (seed.status === "unresolved") return;
+    if (seed.source === "text") {
+      tasteSeeds.push({ artist: seed.input.artist, title: seed.input.title });
+      featureSeeds.push({ mbid: `tastelift-text-${index}`, artist: seed.input.artist, title: seed.input.title });
+    } else {
+      tasteSeeds.push(seed.track);
+      featureSeeds.push(seed.track);
+    }
+  });
+  return { featureSeeds, tasteSeeds };
+}
+
+function poolCandidates(pool: TasteCandidatePool): CandidateEvidence[] {
+  const maxBySeed = new Map<number, number>();
+  for (const candidate of pool.candidates) for (const evidence of candidate.evidence) {
+    maxBySeed.set(evidence.seedIndex, Math.max(maxBySeed.get(evidence.seedIndex) ?? 0, evidence.rawScore));
+  }
+  return pool.candidates.map((candidate) => ({
+    mbid: candidate.mbid,
+    title: candidate.title,
+    artist: candidate.artist,
+    ...(candidate.release ? { release: candidate.release } : {}),
+    evidence: candidate.evidence.map((evidence) => ({
+      seedMbid: evidence.seedMbid,
+      seedIndex: evidence.seedIndex,
+      recordingMbid: evidence.recordingMbid,
+      source: evidence.source,
+      rank: evidence.rank,
+      rawScore: evidence.rawScore,
+      normalizedScore: (maxBySeed.get(evidence.seedIndex) ?? 0) > 0 ? Math.max(0, evidence.rawScore) / (maxBySeed.get(evidence.seedIndex) ?? 1) : 0,
+      reciprocalRank: 1 / (RRF_K + evidence.rank),
+    })).sort((left, right) => left.seedMbid.localeCompare(right.seedMbid) || (left.seedIndex ?? 0) - (right.seedIndex ?? 0) || left.rank - right.rank || (left.recordingMbid ?? "").localeCompare(right.recordingMbid ?? "") || right.rawScore - left.rawScore),
+  }));
+}
+
+/**
+ * Scores Task 2's evidence-preserving retrieval pool directly. Text/OOV seeds
+ * are encoded from input metadata; unresolved outcomes remain structured errors.
+ */
+export function rankTasteCandidatePool(pool: TasteCandidatePool, ranker: RankerName | ModelArtifact, tasteLift: TasteLiftModel): RankedTrack[] {
+  const { featureSeeds, tasteSeeds } = poolSeeds(pool);
+  return rankEvidenceCandidates(featureSeeds, poolCandidates(pool), ranker, tasteLift, tasteSeeds);
 }
 
 export function diversify(

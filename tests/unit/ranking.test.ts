@@ -71,7 +71,7 @@ describe("ranking", () => {
       expect(item.tasteHeadIndex).toBeGreaterThanOrEqual(0);
       expect(item.tasteHeadIndex).toBeLessThan(4);
       expect(item.perHeadScores).toHaveLength(4);
-      expect(item.seedSupportEvidence).toHaveLength(item.seedSupport!);
+      expect(item.seedSupportEvidence?.length).toBeGreaterThanOrEqual(item.seedSupport!);
       expect(item.popularityPercentile).toBeGreaterThanOrEqual(0);
       expect(item.liftScore).toBeTypeOf("number");
       expect(item.score).toBeCloseTo(item.residualScore! + item.liftScore! + item.seedSupport! / seeds.length);

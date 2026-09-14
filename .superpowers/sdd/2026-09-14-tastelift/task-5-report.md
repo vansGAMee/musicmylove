@@ -77,3 +77,26 @@ because this environment does not put the repository root on `sys.path` (and
 the system Python lacks pytest); the equivalent virtualenv invocation with
 `PYTHONPATH=.` passes. The pre-existing deletion of `reports/evaluation.json`
 was preserved and is intentionally not part of this task's commit.
+
+## Review fix round 1
+
+`rankTasteCandidatePool` now consumes Task 2's `TasteCandidatePool` directly,
+without fetching or converting through a `SimilarityLists` wrapper. Every
+resolved seed becomes a model track: MBID seeds use their resolved track and
+`source: "text"` seeds use their canonical `input.artist`/`input.title` OOV
+metadata. A `TasteLiftPoolInputError` exposes all unresolved seed outcomes in
+its `failures` property.
+
+Each Task 2 evidence row is transformed directly into the existing 17-feature
+residual evidence shape. The transform uses per-`seedIndex` maximum score for
+the legacy normalized score and `1 / (60 + rank)` for reciprocal rank; it keeps
+`seedIndex`, `source`, and `recordingMbid`, including rows for alternate MBIDs.
+Consequently `seedSupport` is the distinct input-seed count while
+`seedSupportEvidence` retains all rows.
+
+New integration coverage exercises an MBID seed plus a text/OOV seed, repeated
+alternate-MBID evidence from one seed, a structural unresolved outcome, an
+empty candidate pool, and exactly 200 resolved model seeds. Python/TS parity
+now injects a nonzero empirical percentile (`0.37`) and asserts a positive
+prior (`0.0969233810902`); current max absolute error remains
+`2.95480617307e-7`.

@@ -14,7 +14,7 @@ def _tracks():
         {"id": "seed-e", "artist": "$uicideboy$", "title": "23"},
         {"id": "seed-b", "artist": "1991", "title": "28"},
         {"id": "seed-d", "artist": "Artist D", "title": "Song D"},
-        {"id": "candidate-z", "artist": "Björk", "title": "Hidden Place"},
+        {"id": "candidate-z", "artist": "Björk", "title": "Hidden Place", "popularity": {"percentile": 0.37}},
         {"id": "candidate-a", "artist": "An OOV Artist", "title": "A Very New Song"},
     ]
 
@@ -41,7 +41,12 @@ def test_real_export_matches_typescript_heads_scores_and_lift(tmp_path):
                         for key in ("per_head", "affinity", "popularity_prior", "lift")}
                        for index in range(candidate_ids.shape[1])],
     }
-    payload = {"seeds": tracks[:5], "candidates": tracks[5:]}
+    assert expected["candidates"][0]["popularity_prior"] > 0
+    payload = {"seeds": tracks[:5], "candidates": [
+        {"mbid": track["id"], "artist": track["artist"], "title": track["title"],
+         **({"popularityPercentile": track["popularity"]["percentile"]} if "popularity" in track else {})}
+        for track in tracks[5:]
+    ]}
     path = tmp_path / "tastelift.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     completed = subprocess.run(

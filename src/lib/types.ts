@@ -17,6 +17,10 @@ export interface SeedEvidence {
   rawScore: number;
   normalizedScore: number;
   reciprocalRank: number;
+  /** Retained when this evidence originated in a TasteCandidatePool. */
+  seedIndex?: number;
+  recordingMbid?: string;
+  source?: "listenbrainz";
 }
 
 export interface CandidateEvidence extends Track {
