@@ -1,0 +1,9 @@
+.worktrees
+.venv
+data
+scripts
+tests
+reports
+docs
+*.py
+*.pyc
