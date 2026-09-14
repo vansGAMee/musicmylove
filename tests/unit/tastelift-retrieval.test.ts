@@ -133,3 +133,18 @@ test("collapses alternate MBIDs and obvious remaster or cover versions while pre
     ],
   });
 });
+
+test("retains titles whose cover word is not an entire version qualifier", async () => {
+  const pool = await retrieveTasteCandidates([resolved("seed")], {
+    cache: cache(),
+    fetchSimilarBatch: async () => ({
+      seed: [
+        similar("original", 0.9, "Version Artist", "Song"),
+        similar("not-a-cover", 0.8, "Version Artist", "Song (Not a Cover)"),
+        similar("cover-me", 0.7, "Version Artist", "Song - Cover Me"),
+      ],
+    }),
+  });
+
+  expect(pool.candidates.map((candidate) => candidate.mbid)).toEqual(["original", "not-a-cover", "cover-me"]);
+});
