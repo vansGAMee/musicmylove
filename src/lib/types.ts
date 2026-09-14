@@ -27,6 +27,16 @@ export interface RankedTrack extends Track {
   score: number;
   features: number[];
   pickedFrom: SeedTrack[];
+  /** Present only on the additive TasteLift ranking path. */
+  residualScore?: number;
+  tasteHead?: number;
+  tasteHeadIndex?: number;
+  perHeadScores?: number[];
+  seedSupport?: number;
+  seedSupportEvidence?: SeedEvidence[];
+  popularityPercentile?: number;
+  affinityScore?: number;
+  liftScore?: number;
 }
 
 export type SimilarityLists = Readonly<Record<string, readonly SimilarTrack[]>>;

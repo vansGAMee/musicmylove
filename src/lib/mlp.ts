@@ -38,3 +38,6 @@ export function forward(features: readonly number[], model: ModelArtifact): numb
   });
   return model.residual_feature == null ? values[0] : features[model.residual_feature] + (model.residual_scale ?? 1) * values[0];
 }
+
+/** The existing 17-feature model is always evaluated before optional TasteLift additions. */
+export const legacyResidualScore = forward;

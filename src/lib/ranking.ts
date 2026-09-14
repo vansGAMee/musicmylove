@@ -6,7 +6,9 @@ import type {
   SeedTrack,
   SimilarityLists,
 } from "./types";
-import { forward, type ModelArtifact } from "./mlp";
+import { legacyResidualScore, type ModelArtifact } from "./mlp";
+import { buildTasteLiftRankingFields, tasteLiftContribution } from "./tastelift/features";
+import type { TasteLiftModel } from "./tastelift/model";
 
 const SEED_COUNT = 5;
 const RRF_K = 60;
@@ -101,9 +103,11 @@ export function rankCandidates(
   seeds: readonly SeedTrack[],
   lists: SimilarityLists,
   ranker: RankerName | ModelArtifact,
+  tasteLift?: TasteLiftModel,
 ): RankedTrack[] {
   const seedByMbid = new Map(seeds.map((seed) => [seed.mbid, seed]));
-  const ranked = mergeCandidates(seeds, lists)
+  const candidates = mergeCandidates(seeds, lists);
+  const ranked: RankedTrack[] = candidates
     .map((candidate) => {
       const features = buildFeatures(candidate, seeds);
       const pickedFrom = [...candidate.evidence]
@@ -131,7 +135,7 @@ export function rankCandidates(
   } else if (ranker.production_ranker === "max" || ranker.production_ranker === "rrf") {
     ranked.forEach((item) => { item.score = scoreCandidate(item.features, ranker.production_ranker as RankerName); });
   } else {
-    const neural = new Map(ranked.map((item) => [item.mbid, forward(item.features, ranker)]));
+    const neural = new Map(ranked.map((item) => [item.mbid, legacyResidualScore(item.features, ranker)]));
     if (ranker.production_ranker === "neural") {
       ranked.forEach((item) => { item.score = neural.get(item.mbid)!; });
     } else {
@@ -144,6 +148,15 @@ export function rankCandidates(
       const alpha = ranker.ensemble_alpha ?? 0.5;
       ranked.forEach((item) => { item.score = alpha * neuralRanks.get(item.mbid)! + (1 - alpha) * rrfRanks.get(item.mbid)!; });
     }
+  }
+  if (tasteLift) {
+    const fields = buildTasteLiftRankingFields(tasteLift, seeds, candidates);
+    ranked.forEach((item) => {
+      const taste = fields.get(item.mbid)!;
+      item.residualScore = item.score;
+      Object.assign(item, taste);
+      item.score += tasteLiftContribution(taste, seeds.length);
+    });
   }
   return ranked.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
 }

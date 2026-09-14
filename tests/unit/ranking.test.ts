@@ -7,6 +7,8 @@ import {
 } from "../../src/lib/ranking";
 import type { SeedTrack, SimilarTrack } from "../../src/lib/types";
 import type { ModelArtifact } from "../../src/lib/mlp";
+import tasteLiftArtifact from "../../ml/tastelift-model.json";
+import { TasteLiftModel } from "../../src/lib/tastelift/model";
 
 const seeds: SeedTrack[] = [
   { mbid: "seed-a", title: "A", artist: "Artist A" },
@@ -60,6 +62,22 @@ describe("candidate construction", () => {
 });
 
 describe("ranking", () => {
+  test("adds TasteLift lift and retrieval support to the legacy residual score", () => {
+    const residual = rankCandidates(seeds, lists, "rrf");
+    const ranked = rankCandidates(seeds, lists, "rrf", TasteLiftModel.fromArtifact(tasteLiftArtifact));
+    for (const item of ranked) {
+      const previous = residual.find((candidate) => candidate.mbid === item.mbid)!;
+      expect(item.residualScore).toBe(previous.score);
+      expect(item.tasteHeadIndex).toBeGreaterThanOrEqual(0);
+      expect(item.tasteHeadIndex).toBeLessThan(4);
+      expect(item.perHeadScores).toHaveLength(4);
+      expect(item.seedSupportEvidence).toHaveLength(item.seedSupport!);
+      expect(item.popularityPercentile).toBeGreaterThanOrEqual(0);
+      expect(item.liftScore).toBeTypeOf("number");
+      expect(item.score).toBeCloseTo(item.residualScore! + item.liftScore! + item.seedSupport! / seeds.length);
+    }
+  });
+
   test("uses the production neural artifact rather than hardcoded RRF", () => {
     const neuralLists: Record<string, SimilarTrack[]> = {
       "seed-a": [track("x", "Other", 100), track("y", "Artist A", 50)],
