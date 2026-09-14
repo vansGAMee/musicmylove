@@ -17,6 +17,7 @@ export interface TasteLiftCatalogArtifact {
   source: "listenbrainz-train-histories";
   quantization: { type: "symmetric-int8"; scale: number; encoding: "base64-row-major"; maximumError?: number };
   tracks: readonly TasteLiftCatalogTrack[];
+  histories?: readonly (readonly number[])[];
   vectors: string;
   modelSha256?: string;
   manifestSha256?: string;
@@ -122,32 +123,99 @@ export function retrieveTasteCatalogCandidates(seeds: readonly ResolvedTasteSeed
   return candidates.sort((left, right) => right.retrievalScore - left.retrievalScore || right.support - left.support || left.mbid.localeCompare(right.mbid)).slice(0, Math.max(0, Math.floor(limit)));
 }
 
+/** Sparse train-user co-listen retrieval stored without usernames or listen counts. */
+export function retrieveTasteHistoryCandidates(seeds: readonly ResolvedTasteSeed[], artifact: TasteLiftCatalogArtifact, limit = 500): TasteCandidate[] {
+  if (!artifact.histories?.length) return [];
+  const seedByTrackIndex = new Map<number, number>();
+  const catalogIndex = new Map(artifact.tracks.map((track, index) => [track.mbid, index]));
+  seeds.forEach((seed, seedIndex) => {
+    if (seed.status === "resolved" && seed.source !== "text") {
+      const index = catalogIndex.get(seed.track.mbid);
+      if (index !== undefined) seedByTrackIndex.set(index, seedIndex);
+    }
+  });
+  if (seedByTrackIndex.size === 0) return [];
+  const ownerCounts = new Map<number, number>();
+  for (const history of artifact.histories) for (const trackIndex of history) if (seedByTrackIndex.has(trackIndex)) ownerCounts.set(trackIndex, (ownerCounts.get(trackIndex) ?? 0) + 1);
+  const scores = new Map<number, number>();
+  const supporters = new Map<number, Set<number>>();
+  for (const history of artifact.histories) {
+    const matched = history.filter((trackIndex) => seedByTrackIndex.has(trackIndex));
+    if (!matched.length) continue;
+    for (const trackIndex of history) {
+      if (seedByTrackIndex.has(trackIndex)) continue;
+      for (const seedTrackIndex of matched) {
+        const weight = 1 / Math.sqrt(ownerCounts.get(seedTrackIndex) ?? 1);
+        scores.set(trackIndex, (scores.get(trackIndex) ?? 0) + weight);
+        const set = supporters.get(trackIndex) ?? new Set<number>();
+        set.add(seedByTrackIndex.get(seedTrackIndex)!);
+        supporters.set(trackIndex, set);
+      }
+    }
+  }
+  const byIdentity = new Map<string, TasteCandidate>();
+  for (const [trackIndex, retrievalScore] of scores) {
+    const track = artifact.tracks[trackIndex];
+    if (!track) continue;
+    const seedIndexes = [...(supporters.get(trackIndex) ?? [])].sort((left, right) => left - right);
+    const evidence: TasteCandidateEvidence[] = seedIndexes.map((seedIndex) => ({
+      source: "listenbrainz-history",
+      seedIndex,
+      seedMbid: seedMbid(seeds[seedIndex]!, seedIndex),
+      recordingMbid: track.mbid,
+      rank: 1,
+      rawScore: retrievalScore,
+    }));
+    const candidate: TasteCandidate = { ...track, alternateMbids: [track.mbid], support: seedIndexes.length, retrievalScore, evidence };
+    const identity = recordingIdentity(track);
+    const previous = byIdentity.get(identity);
+    if (!previous || candidate.retrievalScore > previous.retrievalScore || (candidate.retrievalScore === previous.retrievalScore && candidate.mbid.localeCompare(previous.mbid) < 0)) byIdentity.set(identity, candidate);
+  }
+  return [...byIdentity.values()].sort((left, right) => right.retrievalScore - left.retrievalScore || right.support - left.support || left.mbid.localeCompare(right.mbid)).slice(0, Math.max(0, Math.floor(limit)));
+}
+
 /** Preserve both external and neural retrieval coverage before the shared ranker. */
 export function expandTasteCandidatePool(pool: TasteCandidatePool, artifact: TasteLiftCatalogArtifact, model: TasteLiftModel, limit = 500): TasteCandidatePool {
   const target = Math.max(0, Math.floor(limit));
   const neural = retrieveTasteCatalogCandidates(pool.seeds, artifact, model, target);
-  return mergeTasteCandidateSources(pool, neural, target);
+  const history = retrieveTasteHistoryCandidates(pool.seeds, artifact, target);
+  return mergeTasteCandidateSources(pool, neural, target, history);
 }
 
-export function mergeTasteCandidateSources(pool: TasteCandidatePool, neural: readonly TasteCandidate[], limit = 500): TasteCandidatePool {
+export function mergeTasteCandidateSources(pool: TasteCandidatePool, neural: readonly TasteCandidate[], limit = 500, history: readonly TasteCandidate[] = []): TasteCandidatePool {
   const target = Math.max(0, Math.floor(limit));
   const external = [...pool.candidates];
   const selected: TasteCandidate[] = [];
-  const identities = new Set<string>();
+  const identityIndexes = new Map<string, number>();
   const append = (candidate: TasteCandidate) => {
     const identity = recordingIdentity(candidate);
-    if (selected.length >= target || identities.has(identity)) return;
-    identities.add(identity);
+    const selectedIndex = identityIndexes.get(identity);
+    if (selectedIndex !== undefined) {
+      const previous = selected[selectedIndex]!;
+      const evidence = [...previous.evidence, ...candidate.evidence].filter((item, index, rows) => rows.findIndex((other) => other.source === item.source && other.seedIndex === item.seedIndex && other.recordingMbid === item.recordingMbid) === index);
+      selected[selectedIndex] = {
+        ...previous,
+        alternateMbids: [...new Set([...previous.alternateMbids, ...candidate.alternateMbids])].sort(),
+        evidence,
+        support: new Set(evidence.map((item) => item.seedIndex)).size,
+        retrievalScore: Math.max(previous.retrievalScore, candidate.retrievalScore),
+        popularityPercentile: previous.popularityPercentile ?? candidate.popularityPercentile,
+      };
+      return;
+    }
+    if (selected.length >= target) return;
+    identityIndexes.set(identity, selected.length);
     selected.push(candidate);
   };
-  const sourceQuota = Math.floor(target / 2);
-  external.slice(0, sourceQuota).forEach(append);
-  neural.slice(0, sourceQuota).forEach(append);
-  let externalIndex = Math.min(sourceQuota, external.length);
-  let neuralIndex = Math.min(sourceQuota, neural.length);
-  while (selected.length < target && (externalIndex < external.length || neuralIndex < neural.length)) {
-    if (externalIndex < external.length) append(external[externalIndex++]!);
-    if (neuralIndex < neural.length) append(neural[neuralIndex++]!);
+  const sources = [external, history, [...neural]].filter((source) => source.length > 0);
+  const sourceQuota = sources.length ? Math.floor(target / sources.length) : 0;
+  const indexes = sources.map((source) => Math.min(sourceQuota, source.length));
+  sources.forEach((source) => source.slice(0, sourceQuota).forEach(append));
+  while (selected.length < target && sources.some((source, index) => indexes[index]! < source.length)) {
+    sources.forEach((source, index) => {
+      if (indexes[index]! < source.length) append(source[indexes[index]!]!);
+      indexes[index] = indexes[index]! + 1;
+    });
   }
   return { seeds: [...pool.seeds], candidates: selected };
 }

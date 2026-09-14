@@ -8,7 +8,7 @@ import { VersionedCache } from "../src/lib/cache";
 import { createRecommendations } from "../src/lib/recommend";
 import { rankTasteCandidatePool } from "../src/lib/ranking";
 import { buildTasteSlate } from "../src/lib/tastelift/slate";
-import { mergeTasteCandidateSources, retrieveTasteCatalogCandidates, type TasteLiftCatalogArtifact } from "../src/lib/tastelift/catalog";
+import { mergeTasteCandidateSources, retrieveTasteCatalogCandidates, retrieveTasteHistoryCandidates, type TasteLiftCatalogArtifact } from "../src/lib/tastelift/catalog";
 import { TasteLiftModel, type TasteLiftArtifact } from "../src/lib/tastelift/model";
 import { retrieveTasteCandidates } from "../src/lib/tastelift/retrieval";
 import type { ResolvedTasteSeed } from "../src/lib/tastelift/resolver";
@@ -66,7 +66,8 @@ for (const [userIndex, username] of manifest[partition].entries()) {
     const versioned = new VersionedCache<readonly SimilarTrack[]>(`eval-${userKey}-${exampleIndex}`, { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) });
     const external = await retrieveTasteCandidates(seeds, { fetchSimilarBatch: async () => lists, cache: versioned }, 500, { cache: versioned });
     const neuralPool = retrieveTasteCatalogCandidates(seeds, catalog, model, 500);
-    const expanded = mergeTasteCandidateSources(external, neuralPool, 500);
+    const historyPool = retrieveTasteHistoryCandidates(seeds, catalog, 500);
+    const expanded = mergeTasteCandidateSources(external, neuralPool, 500, historyPool);
     const oldRanked = createRecommendations(seedTracks.map((track) => ({ mbid: track.id, artist: track.artist, title: track.title })), lists, 20).map((track) => ({ ...track, popularityPercentile: popularity.get(track.mbid) ?? 0 }));
     const ranked = rankTasteCandidatePool(expanded, rankerJson as ModelArtifact, model);
     const v2 = buildTasteSlate(ranked, 40);
@@ -74,11 +75,12 @@ for (const [userIndex, username] of manifest[partition].entries()) {
     const retrievalBefore = example.hidden.filter((id) => external.candidates.some((candidate) => candidate.mbid === id)).length / example.hidden.length;
     const catalogCoverage = example.hidden.filter((id) => catalogIds.has(id)).length / example.hidden.length;
     const neuralRecall500 = example.hidden.filter((id) => neuralPool.some((candidate) => candidate.mbid === id)).length / example.hidden.length;
+    const historyRecall500 = example.hidden.filter((id) => historyPool.some((candidate) => candidate.mbid === id)).length / example.hidden.length;
     const retrievalAfter = example.hidden.filter((id) => expanded.candidates.some((candidate) => candidate.mbid === id)).length / example.hidden.length;
     const old = rankingMetrics(example.hidden, oldRanked);
     const neural = rankingMetrics(example.hidden, v2);
     const baseline = rankingMetrics(example.hidden, popular);
-    rows.push({ user: userIndex, example: exampleIndex, retrievalBefore, catalogCoverage, neuralRecall500, retrievalAfter, externalPoolSize: external.candidates.length, ...Object.fromEntries(Object.entries(old).map(([key, value]) => [`old_${key}`, value])), ...Object.fromEntries(Object.entries(neural).map(([key, value]) => [`v2_${key}`, value])), ...Object.fromEntries(Object.entries(baseline).map(([key, value]) => [`popularity_${key}`, value])) });
+    rows.push({ user: userIndex, example: exampleIndex, retrievalBefore, catalogCoverage, neuralRecall500, historyRecall500, retrievalAfter, externalPoolSize: external.candidates.length, ...Object.fromEntries(Object.entries(old).map(([key, value]) => [`old_${key}`, value])), ...Object.fromEntries(Object.entries(neural).map(([key, value]) => [`v2_${key}`, value])), ...Object.fromEntries(Object.entries(baseline).map(([key, value]) => [`popularity_${key}`, value])) });
   }
   console.log(JSON.stringify({ event: "progress", partition, users: userIndex + 1, examples: rows.length }));
 }

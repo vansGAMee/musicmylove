@@ -64,10 +64,13 @@ export function buildFeatures(
   candidate: CandidateEvidence,
   seeds: readonly SeedTrack[],
 ): number[] {
-  const similarities = candidate.evidence
+  // The residual ranker was trained on external similarity rows. Neural
+  // catalog support is a TasteLift signal and must not impersonate those rows.
+  const residualEvidence = candidate.evidence.filter((item) => item.source === undefined || item.source === "listenbrainz");
+  const similarities = residualEvidence
     .map((item) => item.normalizedScore)
     .sort((a, b) => b - a);
-  const reciprocalRanks = candidate.evidence
+  const reciprocalRanks = residualEvidence
     .map((item) => item.reciprocalRank)
     .sort((a, b) => b - a);
   const paddedSimilarities = [...similarities, ...Array(SEED_COUNT).fill(0)].slice(0, SEED_COUNT);
@@ -87,7 +90,7 @@ export function buildFeatures(
     ...paddedSimilarities,
     ...paddedRanks,
     reciprocalRanks.reduce((sum, value) => sum + value, 0),
-    candidate.evidence.length / SEED_COUNT,
+    residualEvidence.length / SEED_COUNT,
     paddedSimilarities[0] ?? 0,
     paddedSimilarities[1] ?? 0,
     mean,
@@ -153,11 +156,28 @@ function rankEvidenceCandidates(
   }
   if (tasteLift) {
     const fields = buildTasteLiftRankingFields(tasteLift, tasteSeeds, candidates);
-    ranked.forEach((item) => {
+    ranked.forEach((item, index) => {
       const taste = fields.get(item.mbid)!;
+      const candidate = candidates[index]!;
       item.residualScore = item.score;
       Object.assign(item, taste);
-      item.score += tasteLiftContribution(taste, tasteSeeds.length);
+
+      const hasMultiChannel = candidate.evidence.some((e) => e.source === "listenbrainz-history" || e.source === "tastelift-catalog") || candidate.popularityPercentile !== undefined;
+      if (hasMultiChannel) {
+        const coScore = candidate.evidence
+          .filter((e) => e.source === "listenbrainz-history")
+          .reduce((sum, e) => sum + (e.rawScore ?? 0), 0);
+        const extScore = candidate.evidence
+          .filter((e) => e.source === "listenbrainz" || e.source === undefined)
+          .reduce((sum, e) => sum + (e.reciprocalRank ?? (1 / (RRF_K + (e.rank ?? 60)))), 0);
+        const support = candidate.seedSupport ?? taste.seedSupport;
+        const pop = candidate.popularityPercentile ?? taste.popularityPercentile ?? 0;
+        const residual = coScore * 2.0 + extScore * 40 + support * 1.5 + pop * 1.5;
+        item.residualScore = residual;
+        item.score = residual + taste.liftScore * 0.2;
+      } else {
+        item.score += tasteLiftContribution(taste, tasteSeeds.length);
+      }
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));
@@ -207,6 +227,8 @@ function poolCandidates(pool: TasteCandidatePool): CandidateEvidence[] {
     title: candidate.title,
     artist: candidate.artist,
     ...(candidate.release ? { release: candidate.release } : {}),
+    popularityPercentile: candidate.popularityPercentile,
+    seedSupport: candidate.support,
     evidence: candidate.evidence.map((evidence) => ({
       seedMbid: evidence.seedMbid,
       seedIndex: evidence.seedIndex,

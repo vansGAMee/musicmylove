@@ -36,6 +36,21 @@ describe("TasteCandidatePool ranking", () => {
     expect(ranked!.score).toBeCloseTo(ranked!.residualScore! + ranked!.liftScore! + ranked!.seedSupport! / 5);
   });
 
+  test("does not feed neural catalog evidence into residual features trained on external ranks", () => {
+    const catalogOnly: TasteCandidatePool = {
+      seeds: pool.seeds,
+      candidates: [{
+        mbid: "catalog-only", artist: "Catalog", title: "Discovery", alternateMbids: ["catalog-only"], support: 2, retrievalScore: 1,
+        evidence: [0, 1].map((seedIndex) => ({ source: "tastelift-catalog" as const, seedIndex, seedMbid: `seed-${seedIndex}`, recordingMbid: "catalog-only", rank: 1, rawScore: 0.9 })),
+      }],
+    };
+
+    const [ranked] = rankTasteCandidatePool(catalogOnly, "rrf", model);
+
+    expect(ranked?.features).toEqual(Array(17).fill(0));
+    expect(ranked?.seedSupport).toBe(2);
+  });
+
   test("returns an empty ranked pool without fabricating a candidate", () => {
     expect(rankTasteCandidatePool({ ...pool, candidates: [] }, "rrf", model)).toEqual([]);
   });

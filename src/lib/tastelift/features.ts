@@ -12,7 +12,12 @@ export interface TasteLiftRankingFields {
   liftScore: number;
 }
 
-const asTasteTrack = (track: Pick<TasteLiftTrack, "mbid" | "artist" | "title">): TasteLiftTrack => ({ mbid: track.mbid, artist: track.artist, title: track.title });
+const asTasteTrack = (track: Pick<TasteLiftTrack, "mbid" | "artist" | "title"> & { popularityPercentile?: number }): TasteLiftTrack => ({
+  mbid: track.mbid,
+  artist: track.artist,
+  title: track.title,
+  popularityPercentile: track.popularityPercentile,
+});
 
 /**
  * Keeps retrieval support as explicit evidence and makes the learned lift additive
@@ -30,7 +35,7 @@ export function buildTasteLiftRankingFields(model: TasteLiftModel, seeds: readon
       perHeadScores: score.perHeadScores,
       seedSupport,
       seedSupportEvidence,
-      popularityPercentile: score.popularityPercentile,
+      popularityPercentile: candidate.popularityPercentile ?? score.popularityPercentile,
       affinityScore: score.affinity,
       liftScore: score.lift,
     }];

@@ -45,6 +45,20 @@ def collect_train_tracks(root: Path, manifest_path: Path, popularity: dict[str, 
     return [tracks[mbid] for mbid in sorted(tracks)]
 
 
+def collect_train_histories(root: Path, manifest_path: Path, track_index: dict[str, int]) -> list[list[int]]:
+    manifest = json.loads(manifest_path.read_text())
+    histories = []
+    for username in manifest["train"]:
+        path = root / "data/cache/real-profiles" / f"{_cache_key(username)}.json"
+        if not path.exists():
+            continue
+        rows = json.loads(path.read_text()).get("payload", {}).get("recordings", [])
+        history = sorted({track_index[row["recording_mbid"]] for row in rows if row.get("recording_mbid") in track_index})
+        if history:
+            histories.append(history)
+    return sorted(histories)
+
+
 def quantize_vectors(vectors: Iterable[Iterable[float]]) -> tuple[bytes, float]:
     encoded = bytearray()
     maximum_error = 0.0
@@ -63,6 +77,7 @@ def build_catalog(root: Path, dataset_path: Path, model_path: Path, manifest_pat
     tracks_by_id = {track["id"]: track for track in dataset["tracks"]}
     model = TasteLift.from_export(model_path, dataset["tracks"])
     catalog_tracks = collect_train_tracks(root, manifest_path, exported.get("popularity", {}))
+    histories = collect_train_histories(root, manifest_path, {track["mbid"]: index for index, track in enumerate(catalog_tracks)})
     vectors: list[list[float]] = []
     model.eval()
     with torch.no_grad():
@@ -81,6 +96,7 @@ def build_catalog(root: Path, dataset_path: Path, model_path: Path, manifest_pat
         "modelSha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
         "manifestSha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "tracks": catalog_tracks,
+        "histories": histories,
         "vectors": base64.b64encode(packed).decode("ascii"),
     }
     _atomic_json_write(output_path, payload)

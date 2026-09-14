@@ -4,7 +4,7 @@ import type { SimilarTrack, Track } from "../types";
 import type { ResolvedTasteSeed } from "./resolver";
 import { hasSameRecordingIdentity, recordingIdentity } from "./identity";
 
-export type TasteCandidateSource = "listenbrainz" | "tastelift-catalog";
+export type TasteCandidateSource = "listenbrainz" | "listenbrainz-history" | "tastelift-catalog";
 
 export interface TasteCandidateEvidence {
   source: TasteCandidateSource;
@@ -23,6 +23,7 @@ export interface TasteCandidate extends Track {
   /** Stable pre-ranker retrieval score used solely to cap a fully merged pool. */
   retrievalScore: number;
   evidence: readonly TasteCandidateEvidence[];
+  popularityPercentile?: number;
 }
 
 /** Retains every seed outcome, including text/OOV and resolver failures, alongside candidates. */

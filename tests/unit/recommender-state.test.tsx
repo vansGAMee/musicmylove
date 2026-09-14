@@ -14,9 +14,20 @@ test("prefetches each selection and automatically returns results after the fift
       const title = new URL(url, "http://x").searchParams.get("q")!;
       return new Response(JSON.stringify([{ mbid: `seed-${title}`, title, artist: `Artist ${title}` }]));
     }
-    if (url.startsWith("/api/similar/")) {
-      const seed = url.split("/").pop()!;
-      return new Response(JSON.stringify(Array.from({ length: 25 }, (_, index) => ({ mbid: `candidate-${index}`, title: `Candidate ${index}`, artist: `Artist ${index}`, score: 100 - index + seed.length }))));
+    if (url.startsWith("/api/tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: Array.from({ length: 40 }, (_, index) => ({
+          mbid: `candidate-${index}`,
+          title: `Candidate ${index}`,
+          artist: `Artist ${index}`,
+          score: 100 - index,
+          strongestTasteHead: index % 4,
+          seedSupport: 2,
+          popularityPercentile: 0.5,
+          noveltyLiftScore: 1.2,
+          spotifyLink: `https://open.spotify.com/search/Artist%20${index}%20Candidate%20${index}`,
+        })),
+      }));
     }
     return new Response(JSON.stringify({ id: null }));
   });
@@ -30,8 +41,7 @@ test("prefetches each selection and automatically returns results after the fift
     fireEvent.click(screen.getByRole("button", { name: new RegExp(title, "i") }));
   }
   await act(async () => { await Promise.resolve(); });
-  expect(screen.getAllByTestId("recommendation")).toHaveLength(20);
+  expect(screen.getAllByTestId("recommendation")).toHaveLength(40);
   expect(screen.getByText("5 / 5")).toBeInTheDocument();
-  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/similar/"))).toHaveLength(5);
-  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/spotify/"))).toHaveLength(20);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"))).toHaveLength(1);
 });

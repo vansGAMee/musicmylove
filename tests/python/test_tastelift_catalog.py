@@ -2,7 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from ml.tastelift_catalog import collect_train_tracks, quantize_vectors
+from ml.tastelift_catalog import collect_train_histories, collect_train_tracks, quantize_vectors
 
 
 def _profile(root: Path, username: str, recordings: list[dict]) -> None:
@@ -45,6 +45,9 @@ def test_catalog_contains_only_deduplicated_train_user_history_tracks(tmp_path: 
     assert "validation-only" not in json.dumps(tracks)
     assert "test-only" not in json.dumps(tracks)
     assert "train-a" not in json.dumps(tracks).replace('"mbid": "train-a"', "")
+    histories = collect_train_histories(tmp_path, manifest, {track["mbid"]: index for index, track in enumerate(tracks)})
+    assert histories == [[0, 2], [1, 2]]
+    assert "validation" not in json.dumps(histories)
 
 
 def test_catalog_vectors_use_deterministic_symmetric_int8_quantization():

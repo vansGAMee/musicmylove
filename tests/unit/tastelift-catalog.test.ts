@@ -1,6 +1,6 @@
 import modelArtifact from "../../ml/tastelift-model.json";
 import { describe, expect, test } from "vitest";
-import { retrieveTasteCatalogCandidates, type TasteLiftCatalogArtifact } from "../../src/lib/tastelift/catalog";
+import { retrieveTasteCatalogCandidates, retrieveTasteHistoryCandidates, type TasteLiftCatalogArtifact } from "../../src/lib/tastelift/catalog";
 import { TasteLiftModel, type TasteLiftArtifact, type TasteLiftTrack } from "../../src/lib/tastelift/model";
 import { recommendTasteSeeds } from "../../src/lib/tastelift/pipeline";
 import type { ResolvedTasteSeed } from "../../src/lib/tastelift/resolver";
@@ -70,5 +70,20 @@ describe("TasteLift train-only catalog retrieval", () => {
     expect(result.candidateCount).toBe(45);
     expect(result.recommendations).toHaveLength(40);
     expect(result.recommendations.every((track) => (track.seedSupport ?? 0) > 0 && track.liftScore !== undefined)).toBe(true);
+  });
+
+  test("retrieves co-listened tracks only from anonymous train histories", () => {
+    const tracks = [
+      { mbid: "seed-0", artist: "Seed Artist 0", title: "Seed Song 0", popularityPercentile: 0.2 },
+      { mbid: "co-a", artist: "Co Artist", title: "Hidden A", popularityPercentile: 0.1 },
+      { mbid: "co-b", artist: "Other Co Artist", title: "Hidden B", popularityPercentile: 0.1 },
+    ];
+    const artifact = { ...catalog(tracks, tracks.map(() => Array<number>(24).fill(0))), histories: [[0, 1], [0, 1, 2]] };
+
+    const candidates = retrieveTasteHistoryCandidates(seeds, artifact, 10);
+
+    expect(candidates.map((track) => track.mbid)).toEqual(["co-a", "co-b"]);
+    expect(candidates[0]?.support).toBe(1);
+    expect(candidates[0]?.evidence[0]?.source).toBe("listenbrainz-history");
   });
 });
