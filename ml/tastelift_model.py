@@ -119,8 +119,10 @@ class TasteLift(nn.Module):
         if track_ids.ndim != 2 or mask.shape != track_ids.shape:
             raise ValueError("track ids and mask must have matching [batch, seeds] shape")
         counts = mask.sum(dim=1)
-        if torch.any(counts < 5) or torch.any(counts > 200):
-            raise ValueError("each seed set must contain 5 to 200 tracks")
+        # Serving retains every accepted Task 1 seed (5--500); training episodes
+        # remain independently limited to 5--30 in tastelift_data.py.
+        if torch.any(counts < 5) or torch.any(counts > 500):
+            raise ValueError("each seed set must contain 5 to 500 tracks")
         # Canonical summation order gives exact permutation invariance, even
         # for floating-point addition; masked garbage never reaches embeddings.
         ordered = torch.sort(track_ids.masked_fill(~mask.bool(), len(self.tracks)), dim=1).values

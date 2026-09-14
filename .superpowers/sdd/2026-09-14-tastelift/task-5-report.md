@@ -18,7 +18,7 @@ affinity(c) = 0.1 * logsumexp_k(p_k(c) / 0.1)
 lift(c) = affinity(c) - softplus(log_popularity_weight) * popularityPercentile(c)
 ```
 
-The complete 5--200 seed set is canonical-sorted before track encoding and
+The complete 5--500 seed set is canonical-sorted before track encoding and
 attention reduction, so no supplied seed order affects head vectors or scores.
 
 ## Residual ranking mapping
@@ -100,3 +100,18 @@ empty candidate pool, and exactly 200 resolved model seeds. Python/TS parity
 now injects a nonzero empirical percentile (`0.37`) and asserts a positive
 prior (`0.0969233810902`); current max absolute error remains
 `2.95480617307e-7`.
+
+## Review fix round 2
+
+The Task 1 contract admits 5--500 songs, so both Python `encode_set` and
+TypeScript `encodeSet` now admit the full 5--500 unordered serving set and
+reject 501. Attention pooling is sequence-length agnostic and still sorts the
+whole active set before reduction. This changes serving validation only:
+`tastelift_data.py` continues to construct 5--30-track training episodes, so
+the committed artifact and Task 4 training semantics are unchanged.
+
+Focused verification: the Python model test covers exactly 500 plus rejection
+at 501 and order invariance; TypeScript model/pool tests cover 500 seeds,
+empty candidates, rejection at 501, and canonical reversed input. Focused
+results: 7 Vitest tests, 13 Python model/parity tests, and TypeScript typecheck
+all passed.

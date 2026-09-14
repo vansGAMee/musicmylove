@@ -40,12 +40,12 @@ describe("TasteCandidatePool ranking", () => {
     expect(rankTasteCandidatePool({ ...pool, candidates: [] }, "rrf", model)).toEqual([]);
   });
 
-  test("serves all two hundred resolved seeds without truncating the model input", () => {
-    const twoHundred = Array.from({ length: 200 }, (_, index) => ({
+  test("serves all five hundred resolved seeds without truncating the model input", () => {
+    const fiveHundred = Array.from({ length: 500 }, (_, index) => ({
       input: { artist: `Artist ${index}`, title: `Title ${index}` }, status: "resolved" as const,
       source: "listenbrainz" as const, track: { mbid: `seed-${index}`, artist: `Artist ${index}`, title: `Title ${index}` },
     }));
-    expect(rankTasteCandidatePool({ seeds: twoHundred, candidates: [] }, "rrf", model)).toEqual([]);
+    expect(rankTasteCandidatePool({ seeds: fiveHundred, candidates: [] }, "rrf", model)).toEqual([]);
   });
 
   test("reports unresolved seed outcomes structurally", () => {

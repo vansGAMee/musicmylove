@@ -12,9 +12,9 @@ def api():
     return tastelift_model
 
 
-def dataset():
+def dataset(track_count=210):
     tracks = [{"id": str(i), "artist": f"artist {i % 9}", "title": f"track {i}",
-               "popularity": {"percentile": i / 210}} for i in range(210)]
+               "popularity": {"percentile": i / track_count}} for i in range(track_count)]
     return {"tracks": tracks, "episodes": [{"partition": "train", "user_key": "a",
             "seed_ids": [str(i) for i in range(5)], "positive_id": "6", "negative_id": "7",
             "positive_band": 0, "negative_band": 0, "negative_source": "retrieval"}]}
@@ -59,6 +59,16 @@ def test_variable_set_sizes_and_masked_garbage(length):
     padded = torch.cat([ids, torch.full((1, 7), -999)], dim=1)
     assert torch.equal(expected, net.encode_set(padded, padded >= 0))
     assert torch.isfinite(expected).all()
+
+
+def test_serving_accepts_five_hundred_tracks_and_rejects_five_hundred_one():
+    net = api().TasteLift.from_dataset(dataset(501), dim=24, buckets=128, seed=41).eval()
+    ids = torch.arange(500).unsqueeze(0)
+    mask = torch.ones_like(ids, dtype=torch.bool)
+    expected = net.encode_set(ids, mask)
+    assert torch.equal(expected, net.encode_set(ids.flip(1), mask.flip(1)))
+    with pytest.raises(ValueError, match="5 to 500"):
+        net.encode_set(torch.arange(501).unsqueeze(0), torch.ones((1, 501), dtype=torch.bool))
 
 
 def test_oov_metadata_uses_normalized_subword_path():

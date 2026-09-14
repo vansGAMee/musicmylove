@@ -31,16 +31,19 @@ describe("TasteLiftModel", () => {
     }
   });
 
-  test("requires the trained five-to-two-hundred seed set contract", () => {
+  test("requires the five-to-five-hundred serving seed set contract", () => {
     const model = TasteLiftModel.fromArtifact(artifact);
-    expect(() => model.encodeSet(seeds.slice(0, 4))).toThrow(/5 to 200/i);
+    expect(() => model.encodeSet(seeds.slice(0, 4))).toThrow(/5 to 500/i);
+    const fiveHundredOne = Array.from({ length: 501 }, (_, index) => ({ mbid: `seed-${index}`, artist: `Artist ${index}`, title: `Title ${index}` }));
+    expect(() => model.encodeSet(fiveHundredOne)).toThrow(/5 to 500/i);
   });
 
-  test("accepts exactly two hundred seeds and scores an empty candidate set", () => {
+  test("accepts exactly five hundred seeds in canonical order and scores an empty candidate set", () => {
     const model = TasteLiftModel.fromArtifact(artifact);
-    const twoHundred = Array.from({ length: 200 }, (_, index) => ({ mbid: `seed-${String(index).padStart(3, "0")}`, artist: `Artist ${index}`, title: `Title ${index}` }));
-    const score = model.scoreCandidates(twoHundred, []);
+    const fiveHundred = Array.from({ length: 500 }, (_, index) => ({ mbid: `seed-${String(index).padStart(3, "0")}`, artist: `Artist ${index}`, title: `Title ${index}` }));
+    const score = model.scoreCandidates(fiveHundred, []);
     expect(score.heads).toHaveLength(4);
     expect(score.candidates).toEqual([]);
+    expect(model.scoreCandidates([...fiveHundred].reverse(), [])).toEqual(score);
   });
 });

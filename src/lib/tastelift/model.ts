@@ -157,9 +157,9 @@ export class TasteLiftModel {
     return l2(projected, architecture.normalization_epsilon);
   }
 
-  /** Sorts the complete active set before every reduction, matching PyTorch encode_set. */
+  /** Sorts the complete 5--500 active serving set before every reduction, matching PyTorch encode_set. */
   encodeSet(seeds: readonly TasteLiftTrack[]): number[][] {
-    if (seeds.length < 5 || seeds.length > 200) throw new Error("TasteLift requires 5 to 200 seed tracks");
+    if (seeds.length < 5 || seeds.length > 500) throw new Error("TasteLift requires 5 to 500 seed tracks");
     const vectors = [...seeds].sort(compareTracks).map((seed) => this.encodeTrack(seed));
     const { architecture, weights } = this.artifact;
     const normalizedQueries = weights.queries.map((query) => l2(query, architecture.normalization_epsilon));
