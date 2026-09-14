@@ -13,3 +13,4 @@ data/manifests/
 *.pyc
 *.tsbuildinfo
 .DS_Store
+.vercel

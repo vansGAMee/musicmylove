@@ -42,7 +42,33 @@ export default function MusicRecommender() {
   const [activeScreen, setActiveScreen] = useState<"import" | "playlist" | "player">("playlist");
   const [selectedTrack, setSelectedTrack] = useState<RankedTrack>(INITIAL_FIGMA_TRACKS[0]);
   const [isDragging, setIsDragging] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem("musicmylove:v1:theme");
+      if (savedTheme === "dark" || savedTheme === "light") {
+        setTheme(savedTheme);
+        document.documentElement.setAttribute("data-theme", savedTheme);
+      } else {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    } catch {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "light" ? "dark" : "light";
+    setTheme(nextTheme);
+    document.documentElement.setAttribute("data-theme", nextTheme);
+    try {
+      localStorage.setItem("musicmylove:v1:theme", nextTheme);
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (query.trim().length < 2 || seeds.length >= 5) return;
@@ -167,8 +193,22 @@ export default function MusicRecommender() {
   return (
     <div className="app-wrapper">
       <header className="top-brand">
-        <h1>MOODLIST · JOY DIVISION STYLE</h1>
-        <p>WARM MONOCHROME · HARD TYPOGRAPHY · PHYSICAL DEPTH</p>
+        <div className="top-brand-bar">
+          <div>
+            <h1>MOODLIST · JOY DIVISION STYLE</h1>
+            <p>WARM MONOCHROME · HARD TYPOGRAPHY · PHYSICAL DEPTH</p>
+          </div>
+          <button
+            type="button"
+            className="theme-toggle-btn"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+            title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          >
+            <span>{theme === "light" ? "☾" : "☼"}</span>
+            <span>{theme === "light" ? "Dark" : "Light"}</span>
+          </button>
+        </div>
       </header>
 
       <main className="cards-container">
