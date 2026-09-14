@@ -24,6 +24,93 @@ const INITIAL_FIGMA_TRACKS: RankedTrack[] = [
   { mbid: "demo-5", title: "Shadowplay", artist: "Joy Division", release: "Unknown Pleasures", score: 88, features: [], pickedFrom: [], tasteHeadIndex: 3, popularityPercentile: 0.61, liftScore: 1.5 },
 ];
 
+const TRANSLATIONS = {
+  ru: {
+    brandTitle: "MusicMyLove",
+    brandTagline: "ПЕРСОНАЛЬНЫЕ МУЗЫКАЛЬНЫЕ РЕКОМЕНДАЦИИ НА БАЗЕ ИИ",
+    themeDark: "Тёмная",
+    themeLight: "Светлая",
+    themeDarkAria: "Включить тёмную тему",
+    themeLightAria: "Включить светлую тему",
+    importEyebrow: "Импорт",
+    yourLibrary: "Твоя медиатека",
+    dropzoneLabel: "Перетащите JSON-файл сюда",
+    dropzoneSublabel: "или нажмите для выбора",
+    chooseFile: "Выбрать файл",
+    manualSearch: "Ручной поиск",
+    searchPlaceholder: "Поиск трека или исполнителя…",
+    searchAria: "Поиск песни",
+    readingTaste: "Считывание вашего вкуса…",
+    back: "← Назад",
+    uploadAria: "Загрузить JSON-файл",
+    tracksCountSuffix: "треков",
+    playlistEyebrow: "Плейлист",
+    myPlaylist: "Мой плейлист",
+    tabAll: "Все",
+    tabFavorites: "Избранное",
+    tabRecent: "Недавние",
+    tabMood: "Настроение",
+    navLibrary: "Медиатека",
+    navPlaylists: "Плейлисты",
+    badgeHead: "Вкус",
+    badgePop: "% поп",
+    badgeLift: "лифт",
+    likeAria: "В избранное",
+    dislikeAria: "Скрыть трек",
+    spotifyAria: "Открыть в Spotify",
+    playerAria: "Плеер",
+    removeSeedAria: "Удалить трек",
+    fromLibrary: "Из вашей медиатеки",
+    fromTasteLift: "Рекомендация MusicMyLove AI",
+    openSpotify: "Открыть в Spotify ↗",
+    errorInvalidJson: "Неверный формат JSON. Загрузите файл истории прослушиваний Spotify.",
+    errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON.",
+    errorRecommendationFailed: "Ошибка получения рекомендаций",
+  },
+  en: {
+    brandTitle: "MusicMyLove",
+    brandTagline: "PERSONALIZED AI MUSIC DISCOVERY",
+    themeDark: "Dark",
+    themeLight: "Light",
+    themeDarkAria: "Switch to dark mode",
+    themeLightAria: "Switch to light mode",
+    importEyebrow: "Import",
+    yourLibrary: "your library",
+    dropzoneLabel: "Drop your JSON file here",
+    dropzoneSublabel: "or tap to browse",
+    chooseFile: "Choose File",
+    manualSearch: "Manual search",
+    searchPlaceholder: "Search a song or artist…",
+    searchAria: "Search for a song",
+    readingTaste: "Reading the shape of your taste…",
+    back: "← Back",
+    uploadAria: "Upload JSON file",
+    tracksCountSuffix: "tracks",
+    playlistEyebrow: "playlist",
+    myPlaylist: "My Playlist",
+    tabAll: "All",
+    tabFavorites: "Favorites",
+    tabRecent: "Recent",
+    tabMood: "Mood",
+    navLibrary: "Library",
+    navPlaylists: "Playlists",
+    badgeHead: "Head",
+    badgePop: "% pop",
+    badgeLift: "lift",
+    likeAria: "Like track",
+    dislikeAria: "Dislike track",
+    spotifyAria: "Open in Spotify",
+    playerAria: "Now Playing Player",
+    removeSeedAria: "Remove",
+    fromLibrary: "From your JSON library",
+    fromTasteLift: "MusicMyLove AI Recommendation",
+    openSpotify: "Open in Spotify ↗",
+    errorInvalidJson: "Invalid JSON format. Please upload Spotify streaming history JSON.",
+    errorCouldNotParse: "Could not parse file. Make sure it is valid JSON.",
+    errorRecommendationFailed: "TasteLift recommendation failed",
+  },
+};
+
 const readFeedback = (): Record<string, "like" | "dislike"> => {
   if (typeof window === "undefined") return {};
   try { return JSON.parse(localStorage.getItem("musicmylove:v1:feedback") ?? "{}"); } catch { return {}; }
@@ -43,7 +130,26 @@ export default function MusicRecommender() {
   const [selectedTrack, setSelectedTrack] = useState<RankedTrack>(INITIAL_FIGMA_TRACKS[0]);
   const [isDragging, setIsDragging] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [isRussian, setIsRussian] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const t = isRussian ? TRANSLATIONS.ru : TRANSLATIONS.en;
+
+  useEffect(() => {
+    try {
+      if (typeof navigator !== "undefined") {
+        const langs = navigator.languages ? Array.from(navigator.languages) : [navigator.language];
+        const hasRu = langs.some((l) => typeof l === "string" && l.toLowerCase().startsWith("ru"));
+        if (hasRu) {
+          setIsRussian(true);
+          document.documentElement.lang = "ru";
+        } else {
+          document.documentElement.lang = "en";
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -76,12 +182,20 @@ export default function MusicRecommender() {
     const timer = setTimeout(async () => {
       try {
         const response = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal });
-        if (response.ok) setSearchResults(await response.json());
+        if (response.ok) {
+          const raw = await response.json();
+          const items: Track[] = Array.isArray(raw) ? raw : (raw.results ?? []);
+          setSearchResults(items);
+        }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) setSearchResults([]);
       }
-    }, 300);
-    return () => { clearTimeout(timer); controller.abort(); };
+    }, 200);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query, seeds.length]);
 
   const requestRecommendations = async (payloadBody: unknown) => {
@@ -95,7 +209,7 @@ export default function MusicRecommender() {
       });
       const payload = await response.json() as { error?: string; recommendations?: TasteLiftApiRecommendation[] };
       if (!response.ok || !payload.recommendations) {
-        throw new Error(payload.error ?? "TasteLift recommendation failed");
+        throw new Error(payload.error ?? t.errorRecommendationFailed);
       }
       const mapped: RankedTrack[] = payload.recommendations.map((item) => ({
         mbid: item.mbid,
@@ -117,7 +231,7 @@ export default function MusicRecommender() {
         setActiveScreen("playlist");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "TasteLift recommendation failed");
+      setError(cause instanceof Error ? cause.message : t.errorRecommendationFailed);
     } finally {
       setLoading(false);
     }
@@ -143,7 +257,7 @@ export default function MusicRecommender() {
       const parsed = JSON.parse(text);
       void requestRecommendations(parsed);
     } catch {
-      setError("Invalid JSON format. Please upload Spotify streaming history JSON.");
+      setError(t.errorInvalidJson);
     }
   };
 
@@ -195,18 +309,18 @@ export default function MusicRecommender() {
       <header className="top-brand">
         <div className="top-brand-bar">
           <div>
-            <h1>MOODLIST · JOY DIVISION STYLE</h1>
-            <p>WARM MONOCHROME · HARD TYPOGRAPHY · PHYSICAL DEPTH</p>
+            <h1>{t.brandTitle}</h1>
+            <p>{t.brandTagline}</p>
           </div>
           <button
             type="button"
             className="theme-toggle-btn"
             onClick={toggleTheme}
-            aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
-            title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+            aria-label={theme === "light" ? t.themeDarkAria : t.themeLightAria}
+            title={theme === "light" ? t.themeDarkAria : t.themeLightAria}
           >
             <span>{theme === "light" ? "☾" : "☼"}</span>
-            <span>{theme === "light" ? "Dark" : "Light"}</span>
+            <span>{theme === "light" ? t.themeDark : t.themeLight}</span>
           </button>
         </div>
       </header>
@@ -215,14 +329,14 @@ export default function MusicRecommender() {
         {/* CARD 1: IMPORT */}
         <section
           className={`device-card card-import ${activeScreen !== "import" ? "mobile-hidden" : ""}`}
-          aria-label="Import your library"
+          aria-label={t.yourLibrary}
         >
           <button type="button" className="nav-back" onClick={() => setActiveScreen("playlist")}>
-            ← Back
+            {t.back}
           </button>
 
-          <div className="card-eyebrow">Import</div>
-          <h2 className="card-title-lg">your library</h2>
+          <div className="card-eyebrow">{t.importEyebrow}</div>
+          <h2 className="card-title-lg">{t.yourLibrary}</h2>
 
           <div className="card-scrollable">
             <div
@@ -233,7 +347,7 @@ export default function MusicRecommender() {
               onDrop={handleDrop}
               role="button"
               tabIndex={0}
-              aria-label="Upload JSON file"
+              aria-label={t.uploadAria}
             >
               <div className="tactile-disc-inner">
                 <span>JSON</span>
@@ -241,8 +355,8 @@ export default function MusicRecommender() {
             </div>
 
             <div className="dropzone-container">
-              <p className="dropzone-label">Drop your JSON file here</p>
-              <p className="dropzone-sublabel">or tap to browse</p>
+              <p className="dropzone-label">{t.dropzoneLabel}</p>
+              <p className="dropzone-sublabel">{t.dropzoneSublabel}</p>
             </div>
 
             <input
@@ -259,12 +373,12 @@ export default function MusicRecommender() {
               className="btn-pill"
               onClick={() => fileInputRef.current?.click()}
             >
-              Choose File
+              {t.chooseFile}
             </button>
 
             <div className="manual-search-box">
               <div className="progress-tag">
-                <span>Manual search</span>
+                <span>{t.manualSearch}</span>
                 <span>{seeds.length} / 5</span>
               </div>
 
@@ -272,10 +386,10 @@ export default function MusicRecommender() {
                 <input
                   role="combobox"
                   className="search-input"
-                  aria-label="Search for a song"
+                  aria-label={t.searchAria}
                   aria-controls="search-results-menu"
                   aria-expanded={searchResults.length > 0}
-                  placeholder="Search a song or artist…"
+                  placeholder={t.searchPlaceholder}
                   value={query}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -307,14 +421,14 @@ export default function MusicRecommender() {
                   {seeds.map((s) => (
                     <div key={s.mbid} className="seed-chip">
                       <span>{s.title}</span>
-                      <button type="button" onClick={() => removeSeed(s.mbid)} aria-label={`Remove ${s.title}`}>×</button>
+                      <button type="button" onClick={() => removeSeed(s.mbid)} aria-label={`${t.removeSeedAria}: ${s.title}`}>×</button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
-            {loading && <div className="loading-indicator">Reading the shape of your taste…</div>}
+            {loading && <div className="loading-indicator">{t.readingTaste}</div>}
             {error && <div className="loading-indicator" role="alert">{error}</div>}
           </div>
         </section>
@@ -322,12 +436,12 @@ export default function MusicRecommender() {
         {/* CARD 2: MY PLAYLIST */}
         <section
           className={`device-card card-playlist ${activeScreen !== "playlist" ? "mobile-hidden" : ""}`}
-          aria-label="My Playlist"
+          aria-label={t.myPlaylist}
         >
-          <div className="card-eyebrow">moodlist</div>
-          <h2 className="card-title-lg">My Playlist</h2>
+          <div className="card-eyebrow">{t.playlistEyebrow}</div>
+          <h2 className="card-title-lg">{t.myPlaylist}</h2>
           <div className="card-subtitle">
-            {rankedPool.length > 0 ? `${displayTracks.length} tracks` : "1,248 tracks"}
+            {rankedPool.length > 0 ? `${displayTracks.length} ${t.tracksCountSuffix}` : `1,248 ${t.tracksCountSuffix}`}
           </div>
 
           <div className="filter-pills-bar">
@@ -336,28 +450,28 @@ export default function MusicRecommender() {
               className={`filter-pill ${activeTab === "all" ? "active" : ""}`}
               onClick={() => setActiveTab("all")}
             >
-              All
+              {t.tabAll}
             </button>
             <button
               type="button"
               className={`filter-pill ${activeTab === "favorites" ? "active" : ""}`}
               onClick={() => setActiveTab("favorites")}
             >
-              Favorites
+              {t.tabFavorites}
             </button>
             <button
               type="button"
               className={`filter-pill ${activeTab === "recent" ? "active" : ""}`}
               onClick={() => setActiveTab("recent")}
             >
-              Recent
+              {t.tabRecent}
             </button>
             <button
               type="button"
               className={`filter-pill ${activeTab === "mood" ? "active" : ""}`}
               onClick={() => setActiveTab("mood")}
             >
-              Mood
+              {t.tabMood}
             </button>
           </div>
 
@@ -387,13 +501,13 @@ export default function MusicRecommender() {
                       {rankedPool.length > 0 && (
                         <div className="track-badges">
                           {track.tasteHeadIndex !== undefined && (
-                            <span className="mini-badge head">Head {track.tasteHeadIndex + 1}</span>
+                            <span className="mini-badge head">{t.badgeHead} {track.tasteHeadIndex + 1}</span>
                           )}
                           {track.popularityPercentile !== undefined && (
-                            <span className="mini-badge pop">{Math.round(track.popularityPercentile * 100)}% pop</span>
+                            <span className="mini-badge pop">{Math.round(track.popularityPercentile * 100)}{t.badgePop}</span>
                           )}
                           {track.liftScore !== undefined && (
-                            <span className="mini-badge lift">+{track.liftScore.toFixed(2)} lift</span>
+                            <span className="mini-badge lift">+{track.liftScore.toFixed(2)} {t.badgeLift}</span>
                           )}
                         </div>
                       )}
@@ -404,7 +518,7 @@ export default function MusicRecommender() {
                         type="button"
                         className={`btn-icon ${isLiked ? "active" : ""}`}
                         onClick={() => saveFeedback(track.mbid, "like")}
-                        aria-label={`Like ${track.title}`}
+                        aria-label={`${t.likeAria}: ${track.title}`}
                       >
                         ♥
                       </button>
@@ -412,7 +526,7 @@ export default function MusicRecommender() {
                         type="button"
                         className="btn-icon"
                         onClick={() => saveFeedback(track.mbid, "dislike")}
-                        aria-label={`Dislike ${track.title}`}
+                        aria-label={`${t.dislikeAria}: ${track.title}`}
                       >
                         ×
                       </button>
@@ -421,7 +535,7 @@ export default function MusicRecommender() {
                         target="_blank"
                         rel="noreferrer"
                         className="btn-icon"
-                        aria-label={`Open ${track.title} in Spotify`}
+                        aria-label={`${t.spotifyAria}: ${track.title}`}
                       >
                         ···
                       </a>
@@ -438,14 +552,14 @@ export default function MusicRecommender() {
               className="bottom-tab-link"
               onClick={() => setActiveScreen("import")}
             >
-              Library
+              {t.navLibrary}
             </button>
             <button
               type="button"
               className="bottom-tab-link active"
               onClick={() => setActiveScreen("playlist")}
             >
-              Playlists
+              {t.navPlaylists}
             </button>
           </div>
         </section>
@@ -453,14 +567,14 @@ export default function MusicRecommender() {
         {/* CARD 3: JOY DIVISION TACTILE WHEEL PLAYER */}
         <section
           className={`device-card card-player ${activeScreen !== "player" ? "mobile-hidden" : ""}`}
-          aria-label="Now Playing Player"
+          aria-label={t.playerAria}
         >
           <button
             type="button"
             className="nav-back"
             onClick={() => setActiveScreen("playlist")}
           >
-            ← Back
+            {t.back}
           </button>
 
           <div className="player-view">
@@ -474,7 +588,7 @@ export default function MusicRecommender() {
                 type="button"
                 className={`wheel-control-btn ${feedback[activeTrack.mbid] === "like" ? "active" : ""}`}
                 onClick={() => saveFeedback(activeTrack.mbid, "like")}
-                aria-label="Like"
+                aria-label={t.likeAria}
               >
                 +
               </button>
@@ -489,7 +603,7 @@ export default function MusicRecommender() {
                 type="button"
                 className="wheel-control-btn"
                 onClick={() => saveFeedback(activeTrack.mbid, "dislike")}
-                aria-label="Dislike"
+                aria-label={t.dislikeAria}
               >
                 −
               </button>
@@ -497,7 +611,7 @@ export default function MusicRecommender() {
 
             <div className="player-meta">
               <p>{activeTrack.release ?? "Unknown Pleasures"}</p>
-              <p>From your JSON library</p>
+              <p>{activeTrack.liftScore !== undefined ? t.fromTasteLift : t.fromLibrary}</p>
             </div>
 
             <div className="player-slider">
@@ -510,7 +624,7 @@ export default function MusicRecommender() {
               rel="noreferrer"
               className="btn-pill"
             >
-              Open in Spotify ↗
+              {t.openSpotify}
             </a>
           </div>
         </section>

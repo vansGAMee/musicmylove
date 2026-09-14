@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Onest:wght@400;500;600;700;800&display=swap');
 
 :root {
   --canvas-bg: #e6e5df;
@@ -71,6 +71,53 @@ body {
   transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Russian typography: strictly Onest only when Russian text / lang="ru" */
+:lang(ru), [lang="ru"], [lang="ru"] * {
+  font-family: 'Onest', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+[lang="ru"] .top-brand h1,
+[lang="ru"] .card-title-lg {
+  font-weight: 800;
+}
+
+[lang="ru"] .dropzone-label {
+  font-weight: 700;
+}
+
+[lang="ru"] .track-title {
+  font-weight: 700;
+}
+
+[lang="ru"] .btn-pill,
+[lang="ru"] .theme-toggle-btn,
+[lang="ru"] .filter-pill.active,
+[lang="ru"] .search-item b {
+  font-weight: 600;
+}
+
+[lang="ru"] .card-subtitle,
+[lang="ru"] .track-artist,
+[lang="ru"] .player-meta p,
+[lang="ru"] .search-input,
+[lang="ru"] .dropzone-sublabel {
+  font-weight: 400;
+}
+
+[lang="ru"] .filter-pill,
+[lang="ru"] .bottom-tab-link,
+[lang="ru"] .nav-back {
+  font-weight: 500;
+}
+
+[lang="ru"] .top-brand p,
+[lang="ru"] .card-eyebrow,
+[lang="ru"] .progress-tag,
+[lang="ru"] .mini-badge,
+[lang="ru"] .search-item span {
+  font-weight: 400;
+}
+
 .app-wrapper {
   min-height: 100vh;
   padding: 40px 24px 80px;
@@ -135,29 +182,38 @@ body {
   border-color: var(--ink);
 }
 
+.theme-toggle-btn span:first-child {
+  display: inline-block;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.theme-toggle-btn:hover span:first-child {
+  transform: rotate(24deg) scale(1.18);
+}
+
 .theme-toggle-btn:active {
   transform: translateY(1px);
 }
 
 .cards-container {
   display: flex;
-  gap: 32px;
+  gap: 28px;
   justify-content: center;
   align-items: flex-start;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1240px;
 }
 
 .device-card {
-  width: 360px;
-  min-width: 360px;
-  max-width: 360px;
+  width: 370px;
+  min-width: 370px;
+  max-width: 370px;
   height: 780px;
   max-height: 780px;
   background: var(--card-bg);
   border-radius: 40px;
   box-shadow: var(--shadow-card);
-  padding: 34px 26px 26px;
+  padding: 34px 22px 26px;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -170,7 +226,7 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 2px;
+  padding: 2px 4px 6px 2px;
   display: flex;
   flex-direction: column;
 }
@@ -203,6 +259,14 @@ body {
 .nav-back:hover {
   opacity: 0.7;
   transform: translateX(-2px);
+}
+
+/* Hide back button on desktop since all 3 cards are shown side-by-side in full view;
+   this keeps the top baseline of all 3 cards perfectly aligned horizontally */
+@media (min-width: 1181px) {
+  .nav-back {
+    display: none !important;
+  }
 }
 
 .card-eyebrow {
@@ -254,11 +318,22 @@ body {
   cursor: pointer;
   transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, background-color 0.25s ease;
   margin: 18px auto 8px;
+  animation: gentleFloat 7s ease-in-out infinite;
+}
+
+@keyframes gentleFloat {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 
 .tactile-disc-dropzone:hover,
 .tactile-disc-dropzone.dragging {
-  transform: scale(1.02);
+  animation-play-state: paused;
+  transform: translateY(-2px) scale(1.02);
   box-shadow: 0 22px 44px -4px rgba(0, 0, 0, 0.26), inset 0 2px 5px rgba(255, 255, 255, 0.7);
 }
 
@@ -447,26 +522,38 @@ body {
 .filter-pills-bar {
   background: var(--pill-bg);
   border-radius: 9999px;
-  padding: 4px;
+  padding: 3px;
   display: flex;
-  gap: 2px;
+  gap: 3px;
   margin: 18px 0 12px;
-  height: 40px;
+  height: 38px;
   align-items: center;
   transition: background-color 0.25s ease;
+  width: 100%;
 }
 
 .filter-pill {
   border: none;
   background: transparent;
   color: var(--text-muted);
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: 6px 6px;
+  font-size: 12px;
   font-weight: 500;
   border-radius: 9999px;
   cursor: pointer;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   transition: background-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), color 0.18s ease, transform 0.12s ease;
+}
+
+[lang="ru"] .filter-pill {
+  font-size: 11.5px;
+  padding: 5px 3px;
 }
 
 .filter-pill:hover {
@@ -477,34 +564,56 @@ body {
   background: var(--btn-bg);
   color: var(--btn-text);
   font-weight: 600;
-  padding: 6px 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .track-list {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 
 .track-row {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  padding: 10px 10px;
+  border-radius: 16px;
   cursor: pointer;
-  transition: background-color 0.15s ease, transform 0.12s ease;
+  border: 1px solid transparent;
+  transition: background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.2s ease,
+              box-shadow 0.2s ease;
 }
 
 .track-row:hover {
-  background-color: rgba(128, 128, 128, 0.05);
+  background-color: rgba(128, 128, 128, 0.06);
+  transform: translateX(2px);
 }
 
 .track-row:active {
-  transform: scale(0.995);
+  transform: scale(0.99);
 }
 
 .track-row.selected {
-  background-color: rgba(128, 128, 128, 0.08);
+  background-color: rgba(128, 128, 128, 0.13);
+  border-color: rgba(128, 128, 128, 0.16);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.track-row.selected .vinyl-avatar {
+  animation: spinVinyl 8s linear infinite;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes spinVinyl {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .vinyl-avatar {
@@ -517,7 +626,7 @@ body {
   align-items: center;
   justify-content: center;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.25s ease;
+  transition: background-color 0.25s ease, transform 0.2s ease;
 }
 
 .vinyl-center-hole {
@@ -780,21 +889,225 @@ body {
   }
 }
 
-/* Responsive: When screen < 1180px, toggle mobile cards */
+/* Responsive: App-like single-screen experience on mobile (no body scrolling) */
 @media (max-width: 1180px) {
-  .cards-container {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+
+  .app-wrapper {
+    height: 100dvh;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    padding: max(8px, env(safe-area-inset-top)) 14px max(8px, env(safe-area-inset-bottom));
+    overflow: hidden;
+    box-sizing: border-box;
+    display: flex;
     flex-direction: column;
+    justify-content: flex-start;
     align-items: center;
   }
+
+  .top-brand {
+    margin-bottom: 8px;
+    padding: 0 4px;
+    width: 100%;
+    max-width: 440px;
+    flex-shrink: 0;
+  }
+
+  .top-brand h1 {
+    font-size: 13px;
+    margin: 0 0 2px;
+    letter-spacing: 0.12em;
+  }
+
+  .top-brand p {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+  }
+
+  .cards-container {
+    flex: 1;
+    min-height: 0;
+    height: calc(100% - 44px);
+    width: 100%;
+    max-width: 440px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
   .device-card {
     width: 100%;
-    max-width: 380px;
-    height: auto;
-    min-height: 760px;
-    max-height: 820px;
+    max-width: 100%;
+    min-width: 0;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+    border-radius: 28px;
+    padding: 18px 18px 14px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
   }
+
   .mobile-hidden {
     display: none !important;
+  }
+
+  .card-title-lg {
+    font-size: clamp(28px, 4.5vh, 38px);
+    line-height: 1.05;
+  }
+
+  /* Card 1: Import adjustments on mobile */
+  .card-import .nav-back {
+    display: inline-flex !important;
+    margin-bottom: 8px;
+  }
+
+  .card-import .tactile-disc-dropzone {
+    width: clamp(140px, 20vh, 200px);
+    height: clamp(140px, 20vh, 200px);
+    min-height: 0;
+    margin: 10px auto 6px;
+  }
+
+  .card-import .tactile-disc-inner {
+    width: clamp(64px, 9vh, 90px);
+    height: clamp(64px, 9vh, 90px);
+    font-size: 13px;
+  }
+
+  .card-import .dropzone-container {
+    margin: 8px 0;
+  }
+
+  .card-import .dropzone-label {
+    font-size: 14px;
+    margin-bottom: 2px;
+  }
+
+  .card-import .dropzone-sublabel {
+    font-size: 12px;
+  }
+
+  .card-import .btn-pill {
+    height: 44px;
+    min-height: 44px;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+
+  .card-import .manual-search-box {
+    margin-top: 12px;
+    padding-top: 8px;
+  }
+
+  /* Card 2: Playlist adjustments on mobile */
+  .card-playlist .filter-pills-bar {
+    margin: 10px 0 8px;
+    height: 36px;
+    padding: 3px;
+    display: flex;
+    width: 100%;
+    gap: 3px;
+  }
+
+  .card-playlist .filter-pill {
+    padding: 5px 3px;
+    font-size: 11px;
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card-playlist .track-row {
+    padding: 10px 0;
+    gap: 12px;
+  }
+
+  .card-playlist .vinyl-avatar {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+  }
+
+  .card-playlist .track-title {
+    font-size: 15px;
+  }
+
+  .card-playlist .track-artist {
+    font-size: 12px;
+  }
+
+  .card-playlist .bottom-tab-bar {
+    padding-top: 10px;
+    margin-top: auto;
+    flex-shrink: 0;
+  }
+
+  .card-playlist .bottom-tab-link {
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+
+  /* Card 3: Player adjustments on mobile */
+  .card-player .nav-back {
+    display: inline-flex !important;
+    margin-bottom: 8px;
+  }
+
+  .card-player .player-view {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .card-player .player-header {
+    margin-bottom: 6px;
+  }
+
+  .card-player .joy-division-wheel {
+    width: clamp(150px, 25vh, 220px);
+    height: clamp(150px, 25vh, 220px);
+    margin: 2px auto;
+  }
+
+  .card-player .wheel-inner-hub {
+    width: clamp(64px, 10vh, 90px);
+    height: clamp(64px, 10vh, 90px);
+  }
+
+  .card-player .wheel-spool-center {
+    width: clamp(28px, 4.5vh, 40px);
+    height: clamp(28px, 4.5vh, 40px);
+  }
+
+  .card-player .player-meta {
+    margin-top: 8px;
+    margin-bottom: 6px;
+  }
+
+  .card-player .player-slider {
+    margin: 8px 0 14px;
+  }
+
+  .card-player .btn-pill {
+    height: 44px;
+    min-height: 44px;
+    font-size: 14px;
+    margin-top: 0;
   }
 }
 
