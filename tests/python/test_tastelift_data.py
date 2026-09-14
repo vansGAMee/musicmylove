@@ -1,9 +1,13 @@
 import hashlib
 import json
+import random
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+import ml.tastelift_data as tastelift_data
 from ml.tastelift_data import build_dataset, build_popularity, fnv1a_utf8, hashed_subword_ids
 
 
@@ -50,6 +54,20 @@ def test_episodes_have_canonical_unique_5_to_30_strong_seeds_and_a_held_out_posi
         assert episode["positive_id"] in known - set(episode["seed_ids"])
 
 
+def test_held_out_positive_is_always_an_unseeded_repeated_listen(tmp_path: Path):
+    username = "repeated-listen-user"
+    strong = [_recording(f"strong-{index}", 3) for index in range(6)]
+    weak = [_recording(f"weak-{index}", 1) for index in range(8)]
+    _write_splits(tmp_path, [username])
+    _write_user(tmp_path, username, strong + weak, [{"reference_mbid": "strong-0", "recording_mbid": "negative", "recording_name": "Negative", "artist_credit_name": "Other"}])
+
+    dataset = build_dataset(tmp_path, masks_per_user=12, seed=7)
+
+    strong_ids = {track["recording_mbid"] for track in strong}
+    assert dataset["episodes"]
+    assert all(episode["positive_id"] in strong_ids - set(episode["seed_ids"]) for episode in dataset["episodes"])
+
+
 def test_repeated_masks_are_deterministic_and_not_single_fixed_mask(tmp_path: Path):
     username = "repeat-user"
     _write_splits(tmp_path, [username])
@@ -94,6 +112,17 @@ def test_negative_is_not_any_known_positive_and_matches_empirical_user_frequency
     assert target_episode["negative_band"] == target_episode["positive_band"]
 
 
+def test_exact_band_corpus_negative_beats_nearest_band_retrieval_candidate():
+    popularity = {
+        "retrieval-near": {"user_frequency": 3, "percentile": 0.4, "band": 4},
+        "corpus-exact": {"user_frequency": 4, "percentile": 0.5, "band": 5},
+    }
+
+    selected = tastelift_data._negative_id({"positive"}, {"retrieval-near"}, {"retrieval-near", "corpus-exact"}, 5, popularity, random.Random(3))
+
+    assert selected == ("corpus-exact", "corpus", 5)
+
+
 def test_subword_hash_is_nfkc_lowercase_utf8_fnv1a_and_deduplicated():
     assert fnv1a_utf8("é") == 0x1E9DE8C1
     assert hashed_subword_ids("ＣＡＦÉ", buckets=101, min_n=3, max_n=3) == hashed_subword_ids("café", buckets=101, min_n=3, max_n=3)
@@ -111,3 +140,40 @@ def test_builder_script_runs_directly_from_repository_root():
     root = Path(__file__).resolve().parents[2]
     result = subprocess.run([sys.executable, "scripts/build_tastelift_data.py", "--help"], cwd=root, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_atomic_checkpoint_resumes_unchanged_inputs_and_rejects_changed_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    first, second = "checkpoint-a", "checkpoint-b"
+    first_tracks = [_recording(f"a-{index}", 4) for index in range(8)]
+    second_tracks = [_recording(f"b-{index}", 4) for index in range(8)]
+    _write_splits(tmp_path, [first, second])
+    _write_user(tmp_path, first, first_tracks, [{"reference_mbid": "a-0", "recording_mbid": "candidate-a", "recording_name": "Candidate A", "artist_credit_name": "Other"}])
+    _write_user(tmp_path, second, second_tracks, [{"reference_mbid": "b-0", "recording_mbid": "candidate-b", "recording_name": "Candidate B", "artist_credit_name": "Other"}])
+    checkpoint = tmp_path / "data/cache/tastelift/checkpoint.json"
+    original = tastelift_data._episodes_for_user
+    calls = 0
+
+    def interrupt_after_first(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("simulated interruption")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tastelift_data, "_episodes_for_user", interrupt_after_first)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        build_dataset(tmp_path, masks_per_user=2, seed=5, checkpoint_path=checkpoint, checkpoint_every=1)
+    assert checkpoint.exists()
+    monkeypatch.setattr(tastelift_data, "_episodes_for_user", original)
+
+    resumed = build_dataset(tmp_path, masks_per_user=2, seed=5, checkpoint_path=checkpoint, checkpoint_every=1)
+    clean = build_dataset(tmp_path, masks_per_user=2, seed=5)
+    assert resumed == clean
+
+    _write_user(tmp_path, first, first_tracks + [_recording("changed-track", 1)], [{"reference_mbid": "a-0", "recording_mbid": "candidate-a", "recording_name": "Candidate A", "artist_credit_name": "Other"}])
+    with pytest.raises(ValueError, match="checkpoint"):
+        build_dataset(tmp_path, masks_per_user=2, seed=5, checkpoint_path=checkpoint, checkpoint_every=1)
+
+    checkpoint.unlink()
+    rebuilt = build_dataset(tmp_path, masks_per_user=2, seed=5, checkpoint_path=checkpoint, checkpoint_every=1)
+    assert "changed-track" in {track["id"] for track in rebuilt["tracks"]}

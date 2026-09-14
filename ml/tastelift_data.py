@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-DATASET_VERSION = 1
+DATASET_VERSION = 2
 DEFAULT_MASKS_PER_USER = 12
 MIN_SEEDS = 5
 MAX_SEEDS = 30
@@ -84,6 +84,18 @@ def _load_json(path: Path, fallback: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid local cache JSON: {path}") from error
+
+
+def _file_fingerprint(path: Path) -> dict[str, int | str]:
+    """Return a stable cache-input fingerprint without retaining its contents."""
+    if not path.exists():
+        return {"state": "missing"}
+    stat = path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256": digest.hexdigest()}
 
 
 def _profile_tracks(path: Path) -> dict[str, dict[str, Any]]:
@@ -174,7 +186,8 @@ def _negative_id(
         if exact:
             chosen = exact[rng.randrange(len(exact))]
             return chosen, source, positive_band
-        if source == "retrieval" and choices:
+    for source, choices in (("retrieval", retrieved), ("corpus", corpus)):
+        if choices:
             distance = min(abs(int(_popularity_for(track_id, popularity)["band"]) - positive_band) for track_id in choices)
             nearest = [track_id for track_id in choices if abs(int(_popularity_for(track_id, popularity)["band"]) - positive_band) == distance]
             chosen = nearest[rng.randrange(len(nearest))]
@@ -203,7 +216,7 @@ def _episodes_for_user(
         shuffled = list(strong_ids)
         rng.shuffle(shuffled)
         seed_ids = sorted(shuffled[:seed_count])
-        held_out = sorted(known_ids - set(seed_ids))
+        held_out = sorted(set(strong_ids) - set(seed_ids))
         if not held_out:
             continue
         positive_id = held_out[rng.randrange(len(held_out))]
@@ -276,7 +289,12 @@ def build_dataset(
             seen_users.add(username)
             users.append((partition, _cache_key(username)))
     users.sort(key=lambda item: (item[0], item[1]))
-    signature = hashlib.sha256(json.dumps({"version": DATASET_VERSION, "masks_per_user": masks_per_user, "seed": seed, "users": users}, separators=(",", ":")).encode("utf-8")).hexdigest()
+    input_fingerprints = {
+        "manifest": _file_fingerprint(manifest_path),
+        "profiles": {user_key: _file_fingerprint(root / f"data/cache/real-profiles/{user_key}.json") for _, user_key in users},
+        "retrieval": {user_key: _file_fingerprint(root / f"data/cache/real-retrieval/{user_key}.json") for _, user_key in users},
+    }
+    signature = hashlib.sha256(json.dumps({"version": DATASET_VERSION, "masks_per_user": masks_per_user, "seed": seed, "users": users, "inputs": input_fingerprints}, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
     profiles: dict[str, dict[str, dict[str, Any]]] = {}
     retrievals: dict[str, dict[str, dict[str, Any]]] = {}
