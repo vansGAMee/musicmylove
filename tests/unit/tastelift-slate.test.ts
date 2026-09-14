@@ -84,4 +84,53 @@ describe("TasteLift discovery slate", () => {
     };
     expect(createTasteLiftSlate(pool)).toHaveLength(40);
   });
+
+  test("fills forty when raw long-tail rows exceed their feasible artist-capped capacity", () => {
+    const longTail = Array.from({ length: 14 }, (_, index) => candidate(index, {
+      mbid: `tail-${index}`, artist: "Artist A", title: `Tail ${index}`, popularityPercentile: 0.2, score: 20, residualScore: 20, liftScore: 20, tasteHeadIndex: undefined,
+    }));
+    const mainstream = Array.from({ length: 38 }, (_, index) => candidate(index + 20, {
+      mbid: `main-${index}`, artist: `Mainstream ${index}`, title: `Main ${index}`, popularityPercentile: 0.95, score: 100, residualScore: 100, liftScore: 100, tasteHeadIndex: undefined,
+    }));
+    const reference = candidate(99, { mbid: "reference", artist: "Artist A", title: "Reference", popularityPercentile: 0.2, score: 0, residualScore: 0, liftScore: 0, tasteHeadIndex: undefined });
+    const slate = buildTasteSlate([...longTail, ...mainstream, reference], 40);
+    expect(slate).toHaveLength(40);
+    expect(slate.filter((track) => track.artist === "Artist A")).toHaveLength(2);
+  });
+
+  test("reserves a feasible four-head assignment before greedy selection can strand a head", () => {
+    const heads = [
+      candidate(1, { mbid: "h0-a", artist: "A", title: "H0 A", score: 100, residualScore: 100, liftScore: 100, popularityPercentile: 0.2, tasteHeadIndex: 0 }),
+      candidate(2, { mbid: "h0-b", artist: "B", title: "H0 B", score: 60, residualScore: 60, liftScore: 60, popularityPercentile: 0.2, tasteHeadIndex: 0 }),
+      candidate(3, { mbid: "h1-a", artist: "A", title: "H1 A", score: 99, residualScore: 99, liftScore: 99, popularityPercentile: 0.2, tasteHeadIndex: 1 }),
+      candidate(4, { mbid: "h1-c", artist: "C", title: "H1 C", score: 59, residualScore: 59, liftScore: 59, popularityPercentile: 0.2, tasteHeadIndex: 1 }),
+      candidate(5, { mbid: "h2-a", artist: "A", title: "H2 A", score: 80, residualScore: 80, liftScore: 80, popularityPercentile: 0.2, tasteHeadIndex: 2 }),
+      candidate(6, { mbid: "h3-d", artist: "D", title: "H3 D", score: 70, residualScore: 70, liftScore: 70, popularityPercentile: 0.2, tasteHeadIndex: 3 }),
+    ];
+    const neutral = Array.from({ length: 36 }, (_, index) => candidate(index + 20, { mbid: `neutral-${index}`, artist: `Neutral ${index}`, title: `Neutral ${index}`, score: 10, residualScore: 10, liftScore: 10, popularityPercentile: 0.2, tasteHeadIndex: undefined }));
+    const slate = buildTasteSlate([...heads, ...neutral], 40);
+    expect(slate).toHaveLength(40);
+    expect(new Set(slate.map((track) => track.tasteHeadIndex).filter((head): head is number => head !== undefined))).toEqual(new Set([0, 1, 2, 3]));
+  });
+
+  test("does not treat equal or non-finite mainstream scores as exceptional", () => {
+    const equalMainstream = Array.from({ length: 40 }, (_, index) => candidate(index, {
+      mbid: `equal-${index}`, artist: `Equal ${index}`, popularityPercentile: 0.95, score: Number.NaN, residualScore: Number.NaN, liftScore: Number.NaN, tasteHeadIndex: undefined,
+    }));
+    expect(buildTasteSlate(equalMainstream, 40)).toEqual([]);
+  });
+
+  test("chooses the same complete duplicate record independent of input order", () => {
+    const first = candidate(1, { mbid: "duplicate", artist: "Duplicate", title: "Song", popularityPercentile: 0.2, pickedFrom: [{ mbid: "seed-b", artist: "Seed B", title: "B" }] });
+    const second = candidate(1, { mbid: "duplicate", artist: "Duplicate", title: "Song", popularityPercentile: 0.3, pickedFrom: [{ mbid: "seed-a", artist: "Seed A", title: "A" }] });
+    const rest = Array.from({ length: 39 }, (_, index) => candidate(index + 20, { mbid: `stable-${index}`, artist: `Stable ${index}`, title: `Stable ${index}`, popularityPercentile: 0.2 }));
+    expect(buildTasteSlate([first, second, ...rest], 40)).toEqual(buildTasteSlate([...rest, second, first], 40));
+  });
+
+  test("applies the artist cap across case and whitespace variants", () => {
+    const variants = ["  CASE ARTIST ", "case artist", "Case Artist"].map((artist, index) => candidate(index, { mbid: `case-${index}`, artist, title: `Case ${index}`, popularityPercentile: 0.2 }));
+    const rest = Array.from({ length: 38 }, (_, index) => candidate(index + 20, { mbid: `other-${index}`, artist: `Other ${index}`, title: `Other ${index}`, popularityPercentile: 0.2 }));
+    const slate = buildTasteSlate([...variants, ...rest], 40);
+    expect(slate.filter((track) => track.artist.normalize("NFKC").trim().toLowerCase() === "case artist")).toHaveLength(2);
+  });
 });

@@ -16,9 +16,9 @@
 Hard rules run before and during selection: preserve a single representative
 for each MBID and normalized recording/version identity; select at most two
 tracks per normalized artist; reject popularity percentile `>= 0.85` unless
-normalized relevance or lift is at least `0.90`; cover all available TasteLift
-heads before repeated-head choices; and reserve `ceil(limit * 0.35)` long-tail
-tracks when that supply exists. No candidates are fabricated, so a constrained
+normalized relevance or lift is at least `0.90`; reserve a feasible assignment
+for every available TasteLift head; and reserve `ceil(limit * 0.35)` long-tail
+tracks when that capacity exists. No candidates are fabricated, so a constrained
 pool returns its real shortfall.
 
 `createTasteLiftSlate(pool, limit)` is the production wrapper: it first uses
@@ -42,3 +42,28 @@ add optional `slateScore` and `slateComponents` explanation details.
 - Artist and recording identity limits remain hard even when the requested
   length cannot be reached.
 - Broader repository validation is recorded with the final task handoff.
+
+## Round 1 reviewer fixes
+
+The reviewer report was replaced with this original implementation report and
+the following correction evidence is appended.
+
+- Long-tail reservation now measures feasible capacity per normalized artist
+  (maximum two) rather than raw row count. After head reservations it rechecks
+  the remaining capacity and only keeps choices that preserve the achievable
+  quota; it falls back to ordinary eligible rows rather than manufacturing a
+  shortfall.
+- A deterministic four-head, artist-capacity b-matching is reserved before
+  greedy selection. This prevents early high-scoring choices from consuming an
+  artist twice and stranding a head that has a feasible alternate assignment.
+- Equal or non-finite relevance/lift scales normalize to `0`, so they cannot
+  qualify an otherwise mainstream candidate as exceptional.
+- Duplicate rows use a total, stable serialization tie-breaker over all source
+  fields retained in the output (excluding recomputed slate fields), making the
+  selected object itself permutation-invariant.
+
+Red tests were added for the concentrated long-tail, stranded-head,
+equal/non-finite-mainstream, duplicate-object permutation, and case/whitespace
+artist-cap fixtures. The initial focused run failed in all four reviewer
+failure modes; after the changes, all 11 slate tests and TypeScript typecheck
+pass. Broader quick-suite evidence is recorded with the round-1 handoff.
