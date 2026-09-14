@@ -34,6 +34,13 @@ def test_enforces_one_second_between_successive_requests():
     assert sleeps == [0.75]
 
 
+def test_honors_exhausted_rate_limit_reset_header():
+    sleeps = []
+    client = ApiClient(transport=lambda *_: HttpResult(200, {"x-ratelimit-remaining": "0", "x-ratelimit-reset-in": "2.5"}, b"{}"), sleep=sleeps.append, minimum_interval=0)
+    assert client.request_json("GET", "https://example.test") == {}
+    assert sleeps == [2.5]
+
+
 def test_uses_cached_value_without_network(tmp_path):
     client = ApiClient(transport=lambda *_: (_ for _ in ()).throw(AssertionError("network used")))
     path = tmp_path / "cached.json"

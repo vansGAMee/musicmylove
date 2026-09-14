@@ -1,3 +1,6 @@
+import json
+import subprocess
+
 from ml.features import build_candidate_features, merge_candidate_rows
 
 
@@ -26,3 +29,24 @@ def test_seed_permutation_does_not_change_features():
     first = build_candidate_features(merge_candidate_rows(seeds, rows)["x"], seeds)
     reversed_features = build_candidate_features(merge_candidate_rows(list(reversed(seeds)), rows)["x"], list(reversed(seeds)))
     assert first == reversed_features
+
+
+def test_unicode_identity_and_features_match_typescript(tmp_path):
+    seeds = [
+        {"mbid": "s0", "title": "ΟΣ", "artist": "STRASSE"},
+        *[{"mbid": f"s{i}", "title": f"T{i}", "artist": f"A{i}"} for i in range(1, 5)],
+    ]
+    rows = [
+        {**row("s0", "alternate", 100, "strasse"), "recording_name": "ος"},
+        {**row("s0", "candidate", 90, "Straße"), "recording_name": "Else"},
+    ]
+    candidates = merge_candidate_rows(seeds, rows)
+    lists = {seed["mbid"]: [] for seed in seeds}
+    for item in rows:
+        lists[item["reference_mbid"]].append({"mbid": item["recording_mbid"], "title": item["recording_name"], "artist": item["artist_credit_name"], "score": item["score"]})
+    path = tmp_path / "features.json"
+    path.write_text(json.dumps({"seeds": seeds, "lists": lists}))
+    completed = subprocess.run(["npm", "exec", "tsx", "scripts/ts-feature-parity.ts", str(path)], capture_output=True, text=True, check=True)
+    typescript = json.loads(completed.stdout)
+    assert typescript["mbids"] == sorted(candidates)
+    assert typescript["features"] == {mbid: build_candidate_features(candidate, seeds) for mbid, candidate in candidates.items()}

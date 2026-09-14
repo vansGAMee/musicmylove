@@ -11,8 +11,8 @@ import { forward, type ModelArtifact } from "./mlp";
 const SEED_COUNT = 5;
 const RRF_K = 60;
 
-const artistKey = (artist: string): string => artist.trim().toLocaleLowerCase();
-const textKey = (value: string): string => value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+const textKey = (value: string): string => value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+const artistKey = (artist: string): string => textKey(artist);
 const trackKey = (track: { artist: string; title: string }): string => `${textKey(track.artist)}\u001f${textKey(track.title)}`;
 
 export function mergeCandidates(

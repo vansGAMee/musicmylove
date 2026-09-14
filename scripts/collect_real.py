@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ml.api import ApiClient, PermanentApiError
 from ml.data import create_user_splits
-from ml.examples import build_examples, is_suitable
+from ml.examples import build_examples, is_suitable, validate_profile_response
 from ml.train_real import validate_similarity_rows
 
 ALGORITHM = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30_top_n_listeners_1000"
@@ -34,7 +34,7 @@ def main():
     for index, username in enumerate(manifest["usernames"], 1):
         path = profile_dir / f"{key(username)}.json"
         try:
-            value = client.cached_json(path, "GET", f"https://api.listenbrainz.org/1/stats/user/{urllib.parse.quote(username, safe='')}/recordings?range=all_time&count=100")
+            value = client.cached_json(path, "GET", f"https://api.listenbrainz.org/1/stats/user/{urllib.parse.quote(username, safe='')}/recordings?range=all_time&count=100", validator=validate_profile_response)
             recordings = value.get("payload", {}).get("recordings", [])
             if is_suitable(recordings):
                 usable.append({"username": username, "profile": path.name, "recordings": recordings})
@@ -65,10 +65,16 @@ def main():
             if username not in by_name:
                 continue
             destination = retrieval_dir / f"{key(username)}.json"
-            raw_destination = retrieval_raw_dir / f"{key(username)}.json"
             examples = build_examples(username, by_name[username]["recordings"], 41)
             seed_mbids = sorted({mbid for example in examples for mbid in example["seeds"]})
             payload = [{"recording_mbids": seed_mbids, "algorithm": algorithm}]
+            legacy_raw = retrieval_raw_dir / f"{key(username)}.json"
+            previous_seeds = None
+            if destination.exists():
+                previous = json.loads(destination.read_text())
+                previous_seeds = sorted({mbid for example in previous.get("examples", []) for mbid in example.get("seeds", [])})
+            payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+            raw_destination = legacy_raw if legacy_raw.exists() and previous_seeds == seed_mbids else retrieval_raw_dir / f"{key(username)}-{payload_hash}.json"
             try:
                 rows = client.cached_json(
                     raw_destination,

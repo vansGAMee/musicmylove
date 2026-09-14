@@ -92,7 +92,15 @@ class ApiClient:
                 if result.status == 204:
                     return {}
                 if 200 <= result.status < 300:
-                    return json.loads(result.body)
+                    value = json.loads(result.body)
+                    if result.headers.get("x-ratelimit-remaining") == "0":
+                        try:
+                            reset_delay = float(result.headers.get("x-ratelimit-reset-in", "0") or 0)
+                        except ValueError:
+                            reset_delay = 0
+                        if reset_delay > 0:
+                            self.sleep(reset_delay)
+                    return value
                 if result.status != 429 and result.status < 500:
                     raise PermanentApiError(f"HTTP {result.status}")
                 retry_after = float(result.headers.get("retry-after", "0") or 0)

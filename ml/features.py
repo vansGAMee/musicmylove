@@ -3,7 +3,7 @@ import unicodedata
 
 
 def normalize_text(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", str(value)).casefold().split())
+    return " ".join(unicodedata.normalize("NFKC", str(value)).lower().split())
 
 
 def track_identity(artist: str, title: str) -> str:
@@ -50,8 +50,8 @@ def build_candidate_features(candidate: dict, seeds: list[dict]) -> list[float]:
     positive = [value for value in similarities if value > 0]
     mean = sum(positive) / len(positive) if positive else 0.0
     stddev = math.sqrt(sum((value - mean) ** 2 for value in positive) / len(positive)) if positive else 0.0
-    artist = str(candidate.get("artist", "")).strip().casefold()
-    same_artist = sum(str(seed.get("artist", "")).strip().casefold() == artist for seed in seeds) / 5
+    artist = normalize_text(candidate.get("artist", ""))
+    same_artist = sum(normalize_text(seed.get("artist", "")) == artist for seed in seeds) / 5
     return [
         *similarities,
         *reciprocal,

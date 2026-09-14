@@ -31,10 +31,16 @@ npm run build
 Public usernames, profiles, and retrieval responses are deliberately ignored by Git. `sample_users.py` downloads one official incremental archive, verifies its published SHA-256, extracts active usernames, and deletes the archive. `collect_real.py` is sequential, rate-limited, resumable, schema-validated, and atomically cached. The checked-in aggregate reports contain no usernames.
 
 ```bash
-PYTHONPATH=. .venv/bin/python scripts/sample_users.py
-PYTHONPATH=. .venv/bin/python scripts/collect_real.py --stage all
-PYTHONPATH=. .venv/bin/python scripts/train_real.py
-PYTHONPATH=. .venv/bin/python scripts/evaluate_real.py
+SOURCE_URL=https://ftp.musicbrainz.org/pub/musicbrainz/listenbrainz/incremental/listenbrainz-dump-2660-20260913-000002-incremental/listenbrainz-listens-dump-2660-20260913-000002-incremental.tar.zst
+PYTHONPATH=. .venv/bin/python scripts/sample_users.py --source-url "$SOURCE_URL" --seed 41 --output data/manifests/usernames.json
+PYTHONPATH=. .venv/bin/python scripts/collect_real.py --stage all --manifest data/manifests/usernames.json --split data/manifests/real-splits.json
+
+PYTHONPATH=. .venv/bin/python scripts/sample_users.py --source-url "$SOURCE_URL" --seed 73 --exclude data/manifests/usernames.json --output data/manifests/usernames-second.json
+PYTHONPATH=. .venv/bin/python scripts/collect_real.py --stage all --manifest data/manifests/usernames-second.json --split data/manifests/real-splits-second.json
+PYTHONPATH=. .venv/bin/python scripts/combine_splits.py --first data/manifests/real-splits.json --second data/manifests/real-splits-second.json --output data/manifests/real-splits-final.json
+
+PYTHONPATH=. .venv/bin/python scripts/train_real.py --split data/manifests/real-splits-final.json
+PYTHONPATH=. .venv/bin/python scripts/evaluate_real.py --split data/manifests/real-splits-final.json --marker data/manifests/final-frozen-test-evaluated.json --report reports/evaluation.json
 ```
 
 The final study used a documented sequential protocol after the first frozen test failed: all 394 first-cohort users became development data; a disjoint second cohort contributed 277 train, 59 validation, and 60 new frozen-test users. The model and residual scale were selected only on validation before the second test was opened once.
