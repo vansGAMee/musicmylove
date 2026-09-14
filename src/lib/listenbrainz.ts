@@ -20,6 +20,8 @@ export function parseSpotify(value: unknown): string | null {
 }
 async function json(url: string, signal?: AbortSignal) { return (await fetchWithRetry(url, { signal })).json(); }
 export async function searchRecordings(query: string, signal?: AbortSignal) { return parseSearch(await json(`${LABS}/recording-search/json?query=${encodeURIComponent(query)}`, signal)); }
+/** Searches ListenBrainz with the same artist/title query used by TasteLift seed resolution. */
+export async function searchRecordingsForSeed(query: string, signal?: AbortSignal) { return searchRecordings(query, signal); }
 export async function fetchSimilar(mbid: string, signal?: AbortSignal) { return parseSimilar(await json(`${LABS}/similar-recordings/json?recording_mbids=${encodeURIComponent(mbid)}&algorithm=${encodeURIComponent(SIMILARITY_ALGORITHM)}`, signal)); }
 export async function lookupSpotify(mbid: string, signal?: AbortSignal) { return parseSpotify(await json(`${LABS}/spotify-id-from-mbid/json?recording_mbid=${encodeURIComponent(mbid)}`, signal)); }
 export function spotifySearch(track: Track) { return `https://open.spotify.com/search/${encodeURIComponent(`${track.artist} ${track.title}`)}`; }
