@@ -5,6 +5,7 @@ import type { ModelArtifact } from "./mlp";
 import type { RankedTrack, SeedTrack, SimilarityLists } from "./types";
 import { TasteLiftModel, type TasteLiftArtifact } from "./tastelift/model";
 import type { TasteCandidatePool } from "./tastelift/retrieval";
+import { buildTasteSlate } from "./tastelift/slate";
 
 export function createRecommendations(seeds: readonly SeedTrack[], lists: SimilarityLists, limit = 20): RankedTrack[] {
   return diversify(rankCandidates(seeds, lists, modelJson as ModelArtifact), limit);
@@ -21,4 +22,9 @@ export function createTasteLiftRankedCandidates(seeds: readonly SeedTrack[], lis
 /** Production path for Task 2's evidence-preserving pool; it performs no retrieval. */
 export function createTasteLiftRankedPool(pool: TasteCandidatePool): RankedTrack[] {
   return rankTasteCandidatePool(pool, modelJson as ModelArtifact, TasteLiftModel.fromArtifact(tasteLiftJson as TasteLiftArtifact));
+}
+
+/** Production TasteLift path: rank the evidence-preserving pool then assemble its discovery slate. */
+export function createTasteLiftSlate(pool: TasteCandidatePool, limit = 40): RankedTrack[] {
+  return buildTasteSlate(createTasteLiftRankedPool(pool), limit);
 }

@@ -41,6 +41,19 @@ export interface RankedTrack extends Track {
   popularityPercentile?: number;
   affinityScore?: number;
   liftScore?: number;
+  /** Marginal slate score, added only by buildTasteSlate. */
+  slateScore?: number;
+  /** Human-readable ingredients of a TasteLift slate decision. */
+  slateComponents?: SlateComponents;
+}
+
+export interface SlateComponents {
+  relevance: number;
+  lift: number;
+  serendipity: number;
+  artistDiversity: number;
+  headCoverage: number;
+  marginalScore: number;
 }
 
 export type SimilarityLists = Readonly<Record<string, readonly SimilarTrack[]>>;
