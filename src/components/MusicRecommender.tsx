@@ -74,6 +74,9 @@ const TRANSLATIONS = {
     shareCopyLink: "Скопировать ссылку",
     shareCopied: "Ссылка скопирована!",
     shareClose: "Закрыть",
+    tipText: "Понравились рекомендации? Можно угостить автора чаем ☕",
+    tipButton: "Угостить",
+    tipDismissAria: "Закрыть навсегда",
     errorInvalidJson: "Неверный формат JSON. Загрузите файл истории прослушиваний Spotify.",
     errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON.",
     errorRecommendationFailed: "Ошибка получения рекомендаций",
@@ -126,6 +129,9 @@ const TRANSLATIONS = {
     shareCopyLink: "Copy Link",
     shareCopied: "Link copied!",
     shareClose: "Close",
+    tipText: "Enjoying the recommendations? You can tip the author a tea ☕",
+    tipButton: "Tip tea",
+    tipDismissAria: "Dismiss forever",
     errorInvalidJson: "Invalid JSON format. Please upload Spotify streaming history JSON.",
     errorCouldNotParse: "Could not parse file. Make sure it is valid JSON.",
     errorRecommendationFailed: "TasteLift recommendation failed",
@@ -154,8 +160,30 @@ export default function MusicRecommender() {
   const [isRussian, setIsRussian] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [showTipBanner, setShowTipBanner] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const t = isRussian ? TRANSLATIONS.ru : TRANSLATIONS.en;
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("musicmylove:v1:tip-dismissed") === "true") return;
+    } catch {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setShowTipBanner(true);
+    }, 40000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const dismissTipForever = () => {
+    setShowTipBanner(false);
+    try {
+      localStorage.setItem("musicmylove:v1:tip-dismissed", "true");
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     try {
@@ -372,6 +400,29 @@ export default function MusicRecommender() {
 
   return (
     <div className="app-wrapper">
+      {showTipBanner && (
+        <aside className="tip-toast-banner" role="complementary" aria-label="Support">
+          <span className="tip-toast-text">{t.tipText}</span>
+          <a
+            href="https://pay.cloudtips.ru/p/45660cf3"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="tip-toast-btn"
+          >
+            {t.tipButton}
+          </a>
+          <button
+            type="button"
+            className="tip-toast-close"
+            onClick={dismissTipForever}
+            aria-label={t.tipDismissAria}
+            title={t.tipDismissAria}
+          >
+            ×
+          </button>
+        </aside>
+      )}
+
       <header className="top-brand">
         <div className="top-brand-bar">
           <div>
