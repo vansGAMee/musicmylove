@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RankedTrack, SeedTrack, Track } from "../lib/types";
+import { downloadTasteCardPng } from "../lib/exportCard";
 
 interface TasteLiftApiRecommendation {
   mbid: string;
@@ -63,6 +64,16 @@ const TRANSLATIONS = {
     fromLibrary: "Из вашей медиатеки",
     fromTasteLift: "Рекомендация MusicMyLove AI",
     openSpotify: "Открыть в Spotify ↗",
+    share: "Поделиться",
+    shareAria: "Поделиться",
+    shareTitle: "Экспорт в PNG",
+    shareModalTitle: "Поделиться",
+    shareTopSeeds: "Мой выбор",
+    shareBottomRecs: "Рекомендации",
+    shareDownloadPng: "Скачать PNG",
+    shareCopyLink: "Скопировать ссылку",
+    shareCopied: "Ссылка скопирована!",
+    shareClose: "Закрыть",
     errorInvalidJson: "Неверный формат JSON. Загрузите файл истории прослушиваний Spotify.",
     errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON.",
     errorRecommendationFailed: "Ошибка получения рекомендаций",
@@ -105,6 +116,16 @@ const TRANSLATIONS = {
     fromLibrary: "From your JSON library",
     fromTasteLift: "MusicMyLove AI Recommendation",
     openSpotify: "Open in Spotify ↗",
+    share: "Share",
+    shareAria: "Share",
+    shareTitle: "Export to PNG",
+    shareModalTitle: "Share",
+    shareTopSeeds: "My selection",
+    shareBottomRecs: "Recommendations",
+    shareDownloadPng: "Download PNG",
+    shareCopyLink: "Copy Link",
+    shareCopied: "Link copied!",
+    shareClose: "Close",
     errorInvalidJson: "Invalid JSON format. Please upload Spotify streaming history JSON.",
     errorCouldNotParse: "Could not parse file. Make sure it is valid JSON.",
     errorRecommendationFailed: "TasteLift recommendation failed",
@@ -131,6 +152,8 @@ export default function MusicRecommender() {
   const [isDragging, setIsDragging] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [isRussian, setIsRussian] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const t = isRussian ? TRANSLATIONS.ru : TRANSLATIONS.en;
 
@@ -304,6 +327,49 @@ export default function MusicRecommender() {
   const activeTrack = selectedTrack;
   const spotifyUrl = spotifyLinks[activeTrack.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
 
+  const shareSeeds = useMemo(() => {
+    if (seeds.length > 0) return seeds.map((s) => ({ title: s.title, artist: s.artist }));
+    const liked = Object.keys(feedback).filter((id) => feedback[id] === "like");
+    if (liked.length > 0) {
+      const pool = rankedPool.length > 0 ? rankedPool : INITIAL_FIGMA_TRACKS;
+      return pool
+        .filter((t) => liked.includes(t.mbid))
+        .slice(0, 5)
+        .map((t) => ({ title: t.title, artist: t.artist }));
+    }
+    return INITIAL_FIGMA_TRACKS.slice(0, 4).map((t) => ({ title: t.title, artist: t.artist }));
+  }, [seeds, feedback, rankedPool]);
+
+  const shareRecs = useMemo(() => {
+    const pool = rankedPool.length > 0 ? rankedPool : INITIAL_FIGMA_TRACKS;
+    return pool.slice(0, 5).map((t) => ({
+      title: t.title,
+      artist: t.artist,
+      headIndex: t.tasteHeadIndex,
+      liftScore: t.liftScore,
+      popularityPercentile: t.popularityPercentile,
+    }));
+  }, [rankedPool]);
+
+  const handleDownloadPng = () => {
+    downloadTasteCardPng({
+      seeds: shareSeeds,
+      recommendations: shareRecs,
+      isRussian,
+      theme,
+    });
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.origin);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
     <div className="app-wrapper">
       <header className="top-brand">
@@ -312,16 +378,28 @@ export default function MusicRecommender() {
             <h1>{t.brandTitle}</h1>
             <p>{t.brandTagline}</p>
           </div>
-          <button
-            type="button"
-            className="theme-toggle-btn"
-            onClick={toggleTheme}
-            aria-label={theme === "light" ? t.themeDarkAria : t.themeLightAria}
-            title={theme === "light" ? t.themeDarkAria : t.themeLightAria}
-          >
-            <span>{theme === "light" ? "☾" : "☼"}</span>
-            <span>{theme === "light" ? t.themeDark : t.themeLight}</span>
-          </button>
+          <div className="top-brand-actions">
+            <button
+              type="button"
+              className="share-btn"
+              onClick={() => setIsShareModalOpen(true)}
+              aria-label={t.shareAria}
+              title={t.shareTitle}
+            >
+              <span>↗</span>
+              <span>{t.share}</span>
+            </button>
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              aria-label={theme === "light" ? t.themeDarkAria : t.themeLightAria}
+              title={theme === "light" ? t.themeDarkAria : t.themeLightAria}
+            >
+              <span>{theme === "light" ? "☾" : "☼"}</span>
+              <span>{theme === "light" ? t.themeDark : t.themeLight}</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -629,6 +707,101 @@ export default function MusicRecommender() {
           </div>
         </section>
       </main>
+
+      {isShareModalOpen && (
+        <div className="share-modal-backdrop" onClick={() => setIsShareModalOpen(false)}>
+          <div
+            className="share-modal-dialog"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="share-modal-title"
+          >
+            <div className="share-modal-header">
+              <h3 id="share-modal-title" className="share-modal-title">{t.shareModalTitle}</h3>
+              <button
+                type="button"
+                className="share-modal-close"
+                onClick={() => setIsShareModalOpen(false)}
+                aria-label={t.shareClose}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="taste-card-preview-container">
+              <div className="taste-card-preview">
+                <div className="preview-brand-row">
+                  <span className="preview-brand-title">MUSICMYLOVE</span>
+                </div>
+
+                <div className="preview-waveform">
+                  <div className="preview-wave-line" />
+                  <div className="preview-wave-line" />
+                  <div className="preview-wave-line" />
+                  <div className="preview-wave-line" />
+                  <div className="preview-wave-line" />
+                </div>
+
+                <div className="preview-section">
+                  <div className="preview-section-title">{t.shareTopSeeds}</div>
+                  <div className="preview-track-list">
+                    {shareSeeds.map((s, idx) => (
+                      <div key={idx} className="preview-track-row">
+                        <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
+                        <div className="preview-track-meta">
+                          <span className="preview-track-title">{s.title}</span>
+                          <span className="preview-track-artist">{s.artist}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="preview-divider-line" />
+
+                <div className="preview-section">
+                  <div className="preview-section-title">{t.shareBottomRecs}</div>
+                  <div className="preview-track-list">
+                    {shareRecs.map((r, idx) => (
+                      <div key={idx} className="preview-track-row">
+                        <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
+                        <div className="preview-track-meta">
+                          <span className="preview-track-title">{r.title}</span>
+                          <span className="preview-track-artist">{r.artist}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="preview-footer">
+                  <span>musicmylove.vercel.app</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="share-modal-actions">
+              <button
+                type="button"
+                className="btn-pill share-download-btn"
+                onClick={handleDownloadPng}
+              >
+                <span>⬇</span>
+                <span>{t.shareDownloadPng}</span>
+              </button>
+              <button
+                type="button"
+                className="share-copy-btn"
+                onClick={handleCopyLink}
+              >
+                <span>🔗</span>
+                <span>{copySuccess ? t.shareCopied : t.shareCopyLink}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
