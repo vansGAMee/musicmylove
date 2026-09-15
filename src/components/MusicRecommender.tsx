@@ -75,6 +75,7 @@ const TRANSLATIONS = {
     shareCopied: "Ссылка скопирована!",
     shareClose: "Закрыть",
     tipText: "Понравились рекомендации? Можно угостить автора чаем ☕",
+    tipTextCompact: "Угостить автора чаем ☕",
     tipButton: "Угостить",
     tipDismissAria: "Закрыть навсегда",
     errorInvalidJson: "Неверный формат JSON. Загрузите файл истории прослушиваний Spotify.",
@@ -130,6 +131,7 @@ const TRANSLATIONS = {
     shareCopied: "Link copied!",
     shareClose: "Close",
     tipText: "Enjoying the recommendations? You can tip the author a tea ☕",
+    tipTextCompact: "Tip the author a tea ☕",
     tipButton: "Tip tea",
     tipDismissAria: "Dismiss forever",
     errorInvalidJson: "Invalid JSON format. Please upload Spotify streaming history JSON.",
@@ -402,7 +404,8 @@ export default function MusicRecommender() {
     <div className="app-wrapper">
       {showTipBanner && (
         <aside className="tip-toast-banner" role="complementary" aria-label="Support">
-          <span className="tip-toast-text">{t.tipText}</span>
+          <span className="tip-toast-text tip-toast-text-desktop">{t.tipText}</span>
+          <span className="tip-toast-text tip-toast-text-mobile">{t.tipTextCompact}</span>
           <a
             href="https://pay.cloudtips.ru/p/45660cf3"
             target="_blank"
