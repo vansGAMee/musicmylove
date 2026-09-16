@@ -62,11 +62,13 @@ const TRANSLATIONS = {
     likeAria: "В избранное",
     dislikeAria: "Скрыть трек",
     spotifyAria: "Открыть в Spotify",
+    youtubeAria: "Открыть в YouTube",
     playerAria: "Плеер",
     removeSeedAria: "Удалить трек",
     fromLibrary: "Из вашей медиатеки",
     fromTasteLift: "Рекомендация MusicMyLove AI",
-    openSpotify: "Открыть в Spotify ↗",
+    openSpotify: "Spotify ↗",
+    openYouTube: "YouTube ↗",
     share: "Поделиться",
     shareAria: "Поделиться",
     shareTitle: "Экспорт в PNG",
@@ -137,11 +139,13 @@ const TRANSLATIONS = {
     likeAria: "Like track",
     dislikeAria: "Dislike track",
     spotifyAria: "Open in Spotify",
+    youtubeAria: "Open in YouTube",
     playerAria: "Now Playing Player",
     removeSeedAria: "Remove",
     fromLibrary: "From your library",
     fromTasteLift: "MusicMyLove AI Recommendation",
-    openSpotify: "Open in Spotify ↗",
+    openSpotify: "Spotify ↗",
+    openYouTube: "YouTube ↗",
     share: "Share",
     shareAria: "Share",
     shareTitle: "Export to PNG",
@@ -800,6 +804,7 @@ export default function MusicRecommender() {
 
   const activeTrack = selectedTrack;
   const spotifyUrl = spotifyLinks[activeTrack.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
+  const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
 
   const canShare = useMemo(() => {
     return seeds.length > 0 || importedSeeds.length > 0 || rankedPool.length > 0;
@@ -1309,6 +1314,7 @@ export default function MusicRecommender() {
                 const isSelected = activeTrack?.mbid === track.mbid;
                 const isLiked = feedback[track.mbid] === "like";
                 const rowSpotify = spotifyLinks[track.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${track.artist} ${track.title}`)}`;
+                const rowYoutube = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.artist} ${track.title}`)}`;
                 return (
                   <article
                     key={track.mbid}
@@ -1347,6 +1353,7 @@ export default function MusicRecommender() {
                         className={`btn-icon ${isLiked ? "active" : ""}`}
                         onClick={() => saveFeedback(track.mbid, "like")}
                         aria-label={`${t.likeAria}: ${track.title}`}
+                        title={t.likeAria}
                       >
                         ♥
                       </button>
@@ -1355,6 +1362,7 @@ export default function MusicRecommender() {
                         className="btn-icon"
                         onClick={() => saveFeedback(track.mbid, "dislike")}
                         aria-label={`${t.dislikeAria}: ${track.title}`}
+                        title={t.dislikeAria}
                       >
                         ×
                       </button>
@@ -1364,8 +1372,23 @@ export default function MusicRecommender() {
                         rel="noreferrer"
                         className="btn-icon"
                         aria-label={`${t.spotifyAria}: ${track.title}`}
+                        title={`${t.spotifyAria}: ${track.title}`}
                       >
-                        ···
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.495 17.308a.747.747 0 0 1-1.026.248c-2.812-1.718-6.353-2.107-10.525-1.155a.748.748 0 0 1-.336-1.458c4.567-1.044 8.49-.603 11.639 1.339.36.22.473.69.248 1.026zm1.467-3.262a.936.936 0 0 1-1.287.309c-3.218-1.978-8.125-2.55-11.93-1.395a.936.936 0 1 1-.546-1.791c4.348-1.32 9.774-.683 13.454 1.58.423.26.556.815.309 1.297zm.126-3.41c-3.856-2.29-10.218-2.502-13.882-1.39a1.123 1.123 0 0 1-.652-2.148c4.218-1.28 11.238-1.03 15.688 1.61a1.123 1.123 0 0 1-1.154 1.928z"/>
+                        </svg>
+                      </a>
+                      <a
+                        href={rowYoutube}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-icon"
+                        aria-label={`${t.youtubeAria}: ${track.title}`}
+                        title={`${t.youtubeAria}: ${track.title}`}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                        </svg>
                       </a>
                     </div>
                   </article>
@@ -1446,14 +1469,34 @@ export default function MusicRecommender() {
               <div className="slider-knob" />
             </div>
 
-            <a
-              href={spotifyUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-pill"
-            >
-              {t.openSpotify}
-            </a>
+            <div className="player-external-actions">
+              <a
+                href={spotifyUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-pill player-btn-external"
+                aria-label={`${t.spotifyAria}: ${activeTrack.title}`}
+                title={`${t.spotifyAria}: ${activeTrack.title}`}
+              >
+                <svg className="external-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.495 17.308a.747.747 0 0 1-1.026.248c-2.812-1.718-6.353-2.107-10.525-1.155a.748.748 0 0 1-.336-1.458c4.567-1.044 8.49-.603 11.639 1.339.36.22.473.69.248 1.026zm1.467-3.262a.936.936 0 0 1-1.287.309c-3.218-1.978-8.125-2.55-11.93-1.395a.936.936 0 1 1-.546-1.791c4.348-1.32 9.774-.683 13.454 1.58.423.26.556.815.309 1.297zm.126-3.41c-3.856-2.29-10.218-2.502-13.882-1.39a1.123 1.123 0 0 1-.652-2.148c4.218-1.28 11.238-1.03 15.688 1.61a1.123 1.123 0 0 1-1.154 1.928z"/>
+                </svg>
+                <span>{t.openSpotify}</span>
+              </a>
+              <a
+                href={youtubeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-pill player-btn-external"
+                aria-label={`${t.youtubeAria}: ${activeTrack.title}`}
+                title={`${t.youtubeAria}: ${activeTrack.title}`}
+              >
+                <svg className="external-link-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                <span>{t.openYouTube}</span>
+              </a>
+            </div>
           </div>
         </section>
       </main>

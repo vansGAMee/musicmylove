@@ -1148,7 +1148,8 @@ body {
 .track-row-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .btn-icon {
@@ -1319,6 +1320,36 @@ body {
   transform: translate(-50%, -50%);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   transition: background-color 0.25s ease;
+}
+
+.player-external-actions {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  flex-shrink: 0;
+}
+
+.player-btn-external {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  min-height: 44px;
+  margin-top: 0;
+  font-size: 13px;
+  padding: 0 10px;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.player-btn-external span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-btn-external .external-link-icon {
+  flex-shrink: 0;
 }
 
 .loading-indicator {
@@ -1511,6 +1542,17 @@ body {
     font-size: 12px;
   }
 
+  .card-playlist .track-row-actions {
+    gap: 4px;
+  }
+
+  .card-playlist .track-row-actions .btn-icon {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    font-size: 11px;
+  }
+
   .card-playlist .bottom-tab-bar {
     padding-top: 10px;
     margin-top: auto;
@@ -1569,6 +1611,18 @@ body {
     min-height: 44px;
     font-size: 14px;
     margin-top: 0;
+  }
+
+  .card-player .player-external-actions {
+    margin-top: 0;
+    gap: 6px;
+  }
+
+  .card-player .player-btn-external {
+    height: 42px;
+    min-height: 42px;
+    font-size: 12.5px;
+    padding: 0 6px;
   }
 }
 
