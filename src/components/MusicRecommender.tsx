@@ -236,6 +236,7 @@ export default function MusicRecommender() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>({});
+  const [cachedFavorites, setCachedFavorites] = useState<RankedTrack[]>([]);
   const [spotifyLinks, setSpotifyLinks] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<"all" | "favorites" | "recent" | "mood">("all");
   const [activeScreen, setActiveScreen] = useState<"import" | "playlist" | "player">("playlist");
@@ -372,14 +373,39 @@ export default function MusicRecommender() {
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("musicmylove:v1:feedback");
-      if (saved) {
-        const parsed = JSON.parse(saved) as Record<string, string>;
-        const cleaned = Object.fromEntries(
-          Object.entries(parsed).filter(([id, v]) => !id.startsWith("demo-") || v === "like")
-        );
-        setFeedback(cleaned as Record<string, "like" | "dislike">);
+      const savedFeedback = localStorage.getItem("musicmylove:v1:feedback");
+      const savedFavorites = localStorage.getItem("musicmylove:v1:favorite-tracks");
+      const savedSpotify = localStorage.getItem("musicmylove:v1:spotify-links");
+
+      let loadedFeedback: Record<string, "like" | "dislike"> = {};
+      if (savedFeedback) {
+        const parsed = JSON.parse(savedFeedback) as Record<string, string>;
+        loadedFeedback = Object.fromEntries(
+          Object.entries(parsed).filter(([id, v]) => (!id.startsWith("demo-") || v === "like") && (v === "like" || v === "dislike"))
+        ) as Record<string, "like" | "dislike">;
       }
+
+      if (savedFavorites) {
+        const parsedFavs = JSON.parse(savedFavorites) as RankedTrack[];
+        if (Array.isArray(parsedFavs)) {
+          const validFavs = parsedFavs.filter((t) => t && typeof t.mbid === "string" && typeof t.title === "string");
+          setCachedFavorites(validFavs);
+          for (const fav of validFavs) {
+            if (loadedFeedback[fav.mbid] !== "dislike") {
+              loadedFeedback[fav.mbid] = "like";
+            }
+          }
+        }
+      }
+
+      if (savedSpotify) {
+        const parsedSpotify = JSON.parse(savedSpotify) as Record<string, string>;
+        if (parsedSpotify && typeof parsedSpotify === "object") {
+          setSpotifyLinks((prev) => ({ ...parsedSpotify, ...prev }));
+        }
+      }
+
+      setFeedback(loadedFeedback);
     } catch {
       // ignore
     }
@@ -441,7 +467,11 @@ export default function MusicRecommender() {
           );
           const extraLikedSongs: Array<{ artist: string; title: string }> = [];
           for (const mbid of likedMbids) {
-            const track = rankedPool.find((t) => t.mbid === mbid) ?? seeds.find((s) => s.mbid === mbid) ?? INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
+            const track =
+              rankedPool.find((t) => t.mbid === mbid) ??
+              cachedFavorites.find((t) => t.mbid === mbid) ??
+              seeds.find((s) => s.mbid === mbid) ??
+              INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
             if (track) {
               const key = `${track.artist.toLowerCase()}:::${track.title.toLowerCase()}`;
               if (!existingKeys.has(key)) {
@@ -525,7 +555,16 @@ export default function MusicRecommender() {
         liftScore: item.noveltyLiftScore,
       }));
       setRankedPool(mapped);
-      setSpotifyLinks(Object.fromEntries(payload.recommendations.map((item) => [item.mbid, item.spotifyLink])));
+      const newSpotifyLinks = Object.fromEntries(payload.recommendations.map((item) => [item.mbid, item.spotifyLink]));
+      setSpotifyLinks((prev) => {
+        const merged = { ...prev, ...newSpotifyLinks };
+        try {
+          localStorage.setItem("musicmylove:v1:spotify-links", JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+        return merged;
+      });
       if (mapped.length > 0) {
         setSelectedTrack(mapped[0]);
         setActiveScreen("playlist");
@@ -846,6 +885,47 @@ export default function MusicRecommender() {
       // ignore
     }
 
+    // Persist full favorite track metadata to localStorage
+    try {
+      let updatedFavorites = [...cachedFavorites];
+      if (nextValue === "like") {
+        const sourceTrack =
+          rankedPool.find((t) => t.mbid === mbid) ??
+          cachedFavorites.find((t) => t.mbid === mbid) ??
+          (selectedTrack?.mbid === mbid ? selectedTrack : undefined) ??
+          seeds.find((s) => s.mbid === mbid) ??
+          INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
+
+        if (sourceTrack) {
+          const rt = sourceTrack as Partial<RankedTrack>;
+          const trackToStore: RankedTrack = {
+            mbid: sourceTrack.mbid,
+            title: sourceTrack.title,
+            artist: sourceTrack.artist,
+            release: sourceTrack.release,
+            score: typeof rt.score === "number" ? rt.score : 100,
+            features: Array.isArray(rt.features) ? rt.features : [],
+            pickedFrom: Array.isArray(rt.pickedFrom) ? rt.pickedFrom : [],
+            tasteHeadIndex: typeof rt.tasteHeadIndex === "number" ? rt.tasteHeadIndex : undefined,
+            popularityPercentile: typeof rt.popularityPercentile === "number" ? rt.popularityPercentile : undefined,
+            liftScore: typeof rt.liftScore === "number" ? rt.liftScore : undefined,
+          };
+          const existingIdx = updatedFavorites.findIndex((t) => t.mbid === mbid);
+          if (existingIdx >= 0) {
+            updatedFavorites[existingIdx] = trackToStore;
+          } else {
+            updatedFavorites.push(trackToStore);
+          }
+        }
+      } else {
+        updatedFavorites = updatedFavorites.filter((t) => t.mbid !== mbid);
+      }
+      setCachedFavorites(updatedFavorites);
+      localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify(updatedFavorites));
+    } catch {
+      // ignore
+    }
+
     // Dynamic influence on neural network: when user likes or un-likes a track,
     // refresh recommendations with the updated favorites incorporated into the taste seeds!
     if (rankedPool.length > 0 && (allPlaylistTracks.length >= 5 || importedSeeds.length >= 5 || seeds.length >= 5)) {
@@ -878,6 +958,12 @@ export default function MusicRecommender() {
           liked.push(track);
         }
       }
+      for (const track of cachedFavorites) {
+        if (likedMbids.has(track.mbid) && !seen.has(track.mbid)) {
+          seen.add(track.mbid);
+          liked.push(track);
+        }
+      }
       for (const seed of seeds) {
         if (likedMbids.has(seed.mbid) && !seen.has(seed.mbid)) {
           seen.add(seed.mbid);
@@ -885,6 +971,7 @@ export default function MusicRecommender() {
             mbid: seed.mbid,
             title: seed.title,
             artist: seed.artist,
+            release: seed.release,
             score: 100,
             features: [],
             pickedFrom: [],
@@ -924,15 +1011,15 @@ export default function MusicRecommender() {
     }
 
     return INITIAL_FIGMA_TRACKS;
-  }, [rankedPool, feedback, activeTab, seeds, importedSeeds, allPlaylistTracks]);
+  }, [rankedPool, feedback, activeTab, seeds, importedSeeds, allPlaylistTracks, cachedFavorites]);
 
   const activeTrack = selectedTrack;
   const spotifyUrl = spotifyLinks[activeTrack.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
   const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
 
   const canShare = useMemo(() => {
-    return seeds.length > 0 || importedSeeds.length > 0 || rankedPool.length > 0;
-  }, [seeds.length, importedSeeds.length, rankedPool.length]);
+    return seeds.length > 0 || importedSeeds.length > 0 || rankedPool.length > 0 || cachedFavorites.length > 0;
+  }, [seeds.length, importedSeeds.length, rankedPool.length, cachedFavorites.length]);
 
   const shareSeeds = useMemo(() => {
     if (seeds.length > 0) {
@@ -942,15 +1029,16 @@ export default function MusicRecommender() {
       return importedSeeds.slice(0, 5);
     }
     const liked = Object.keys(feedback).filter((id) => feedback[id] === "like");
-    if (liked.length > 0 && rankedPool.length > 0) {
-      return rankedPool
-        .filter((t) => liked.includes(t.mbid))
-        .slice(0, 5)
-        .map((t) => ({ title: t.title, artist: t.artist }));
+    if (liked.length > 0) {
+      const candidates = [...rankedPool, ...cachedFavorites];
+      const found = candidates.filter((t) => liked.includes(t.mbid));
+      if (found.length > 0) {
+        return found.slice(0, 5).map((t) => ({ title: t.title, artist: t.artist }));
+      }
     }
     // NEVER fall back to dummy/initial tracks in Share!
     return [];
-  }, [seeds, importedSeeds, feedback, rankedPool]);
+  }, [seeds, importedSeeds, feedback, rankedPool, cachedFavorites]);
 
   const shareRecs = useMemo(() => {
     if (rankedPool.length === 0) {
@@ -1406,7 +1494,9 @@ export default function MusicRecommender() {
           <div className="card-eyebrow">{t.playlistEyebrow}</div>
           <h2 className="card-title-lg">{t.myPlaylist}</h2>
           <div className="card-subtitle">
-            {rankedPool.length > 0 ? `${displayTracks.length} ${t.tracksCountSuffix}` : `1,248 ${t.tracksCountSuffix}`}
+            {rankedPool.length > 0 || activeTab === "favorites"
+              ? `${displayTracks.length} ${t.tracksCountSuffix}`
+              : `1,248 ${t.tracksCountSuffix}`}
           </div>
 
           <div className="filter-pills-bar">

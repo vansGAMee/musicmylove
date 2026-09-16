@@ -333,5 +333,124 @@ test("excludes tracks from the entire playlist even when playlist has more than 
   expect(recTitles).not.toContain("Existing Song 550");
 });
 
+test("persists liked tracks to localStorage favorite-tracks cache and loads them on mount into Favorites tab", async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+  vi.stubGlobal("fetch", fetcher);
+
+  // Prepopulate localStorage with a saved favorite track from a previous session
+  const savedFavorite = {
+    mbid: "fav-saved-1",
+    title: "Saved From Cache",
+    artist: "Cached Artist",
+    release: "Cached Album",
+    score: 98,
+    features: [],
+    pickedFrom: [],
+    liftScore: 1.45,
+    popularityPercentile: 0.6,
+  };
+  localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify([savedFavorite]));
+
+  render(<MusicRecommender />);
+
+  // Switch to Favorites tab
+  const favoritesTabBtn = screen.getAllByRole("button", { name: /Favorites|Избранное/i })[0];
+  await act(async () => {
+    fireEvent.click(favoritesTabBtn);
+  });
+
+  // Saved favorite track from cache is rendered immediately!
+  expect(screen.getByText("Saved From Cache")).toBeInTheDocument();
+  expect(screen.getByText("Cached Artist")).toBeInTheDocument();
+
+  // Like a demo track (e.g., Ceremony by New Order)
+  const allTabBtn = screen.getAllByRole("button", { name: /All|Все/i })[0];
+  await act(async () => {
+    fireEvent.click(allTabBtn);
+  });
+
+  const ceremonyLikeBtn = screen.getByRole("button", { name: /^like track: ceremony$/i });
+  await act(async () => {
+    fireEvent.click(ceremonyLikeBtn);
+  });
+
+  // Check localStorage favorite-tracks
+  const storedJson = localStorage.getItem("musicmylove:v1:favorite-tracks");
+  expect(storedJson).not.toBeNull();
+  const storedTracks = JSON.parse(storedJson!);
+  expect(storedTracks.some((t: { title: string }) => t.title === "Ceremony")).toBe(true);
+  expect(storedTracks.some((t: { title: string }) => t.title === "Saved From Cache")).toBe(true);
+
+  // Un-like Ceremony
+  await act(async () => {
+    fireEvent.click(ceremonyLikeBtn);
+  });
+
+  const storedAfterUnlike = JSON.parse(localStorage.getItem("musicmylove:v1:favorite-tracks")!);
+  expect(storedAfterUnlike.some((t: { title: string }) => t.title === "Ceremony")).toBe(false);
+  expect(storedAfterUnlike.some((t: { title: string }) => t.title === "Saved From Cache")).toBe(true);
+});
+
+test("incorporates cached favorite tracks into taste seeds when requesting recommendations", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith("/api/tastelift")) {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        recommendations: [
+          { mbid: "rec-new-1", title: "New Rec", artist: "New Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+        ],
+        seeds: body.songs.map((s: { artist: string; title: string }, i: number) => ({
+          input: s,
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: s.artist, title: s.title },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  // Prepopulate localStorage with cached favorite track
+  localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify([
+    {
+      mbid: "fav-prior-1",
+      title: "Previous Love",
+      artist: "Loved Creator",
+      score: 100,
+      features: [],
+      pickedFrom: [],
+    },
+  ]));
+
+  const { container } = render(<MusicRecommender />);
+  const playlistInput = [
+    "Artist,Title",
+    "Base Artist 1,Base Title 1",
+    "Base Artist 2,Base Title 2",
+    "Base Artist 3,Base Title 3",
+    "Base Artist 4,Base Title 4",
+    "Base Artist 5,Base Title 5",
+  ].join("\n");
+
+  const file = new File([playlistInput], "seeds.csv", { type: "text/csv" });
+  file.text = async () => playlistInput;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
+  expect(tasteliftCalls.length).toBeGreaterThanOrEqual(1);
+  const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
+  const sentSongTitles = sentPayload.songs.map((s: { title: string }) => s.title);
+
+  // Must include the favorite track loaded from persistent cache!
+  expect(sentSongTitles).toContain("Previous Love");
+});
+
+
 
 
