@@ -25,6 +25,38 @@ export interface YandexFetchOptions {
   timeoutMs?: number;
   retries?: number;
   fetcher?: typeof fetch;
+  skipCache?: boolean;
+}
+
+interface CachedPlaylist {
+  result: YandexPlaylistResult;
+  timestamp: number;
+}
+
+const PLAYLIST_CACHE = new Map<string, CachedPlaylist>();
+const MAX_PLAYLIST_CACHE = 500;
+const PLAYLIST_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+export function clearYandexPlaylistCache(): void {
+  PLAYLIST_CACHE.clear();
+}
+
+function cacheAndReturn(
+  canonicalUrl: string,
+  result: YandexPlaylistResult,
+  skipCache?: boolean
+): YandexPlaylistResult {
+  if (!skipCache) {
+    if (PLAYLIST_CACHE.size >= MAX_PLAYLIST_CACHE) {
+      const oldestKey = PLAYLIST_CACHE.keys().next().value;
+      if (oldestKey) PLAYLIST_CACHE.delete(oldestKey);
+    }
+    PLAYLIST_CACHE.set(canonicalUrl, {
+      result,
+      timestamp: Date.now(),
+    });
+  }
+  return result;
 }
 
 export interface NormalizedYandexUrl {
@@ -133,14 +165,20 @@ const DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKi
 async function fetchWithBackoff(
   url: string,
   init: RequestInit,
-  options: { timeoutMs: number; retries: number; fetcher: typeof fetch }
+  options: { timeoutMs: number; retries: number; fetcher: typeof fetch; deadline?: number }
 ): Promise<Response> {
-  const { timeoutMs, retries, fetcher } = options;
+  const { timeoutMs, retries, fetcher, deadline } = options;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < retries; attempt++) {
+    if (deadline && Date.now() >= deadline) {
+      break;
+    }
+    const remainingTime = deadline ? Math.max(1000, deadline - Date.now()) : timeoutMs;
+    const effectiveTimeout = Math.min(timeoutMs, remainingTime);
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
 
     try {
       const response = await fetcher(url, {
@@ -346,11 +384,19 @@ export async function fetchYandexPlaylist(
   rawUrl: string,
   options: YandexFetchOptions = {}
 ): Promise<YandexPlaylistResult> {
-  const timeoutMs = options.timeoutMs ?? 8000;
-  const retries = options.retries ?? 3;
+  const timeoutMs = options.timeoutMs ?? 3500;
+  const retries = options.retries ?? 2;
   const fetcher = options.fetcher ?? fetch;
+  const deadline = Date.now() + 7500;
 
   const normalized = normalizeYandexPlaylistUrl(rawUrl);
+
+  if (!options.skipCache) {
+    const cached = PLAYLIST_CACHE.get(normalized.canonicalUrl);
+    if (cached && Date.now() - cached.timestamp < PLAYLIST_CACHE_TTL_MS) {
+      return cached.result;
+    }
+  }
 
   let currentOwner = normalized.owner;
   let currentKind = normalized.kind;
@@ -363,7 +409,7 @@ export async function fetchYandexPlaylist(
       const redirectRes = await fetchWithBackoff(
         targetUrl,
         { method: "GET", redirect: "follow" },
-        { timeoutMs, retries: 2, fetcher }
+        { timeoutMs, retries: 2, fetcher, deadline }
       );
       targetUrl = redirectRes.url;
       const reNormalized = normalizeYandexPlaylistUrl(targetUrl);
@@ -389,7 +435,7 @@ export async function fetchYandexPlaylist(
             "X-Retpath-Y": `https://music.yandex.ru/users/${encodeURIComponent(currentOwner)}/playlists/${currentKind}`,
           },
         },
-        { timeoutMs, retries, fetcher }
+        { timeoutMs, retries, fetcher, deadline }
       );
 
       const text = await response.text();
@@ -414,13 +460,17 @@ export async function fetchYandexPlaylist(
             if (parsed) parsedTracks.push(parsed);
           }
           const deduplicated = deduplicateTracks(parsedTracks);
-          return {
-            id: `${currentOwner}:${currentKind}`,
-            title: data.playlist.title ?? `Плейлист ${currentOwner}`,
-            owner: currentOwner,
-            trackCount: deduplicated.length,
-            tracks: deduplicated,
-          };
+          return cacheAndReturn(
+            normalized.canonicalUrl,
+            {
+              id: `${currentOwner}:${currentKind}`,
+              title: data.playlist.title ?? `Плейлист ${currentOwner}`,
+              owner: currentOwner,
+              trackCount: deduplicated.length,
+              tracks: deduplicated,
+            },
+            options.skipCache
+          );
         }
       }
     } catch (e) {
@@ -441,7 +491,7 @@ export async function fetchYandexPlaylist(
             "X-Yandex-Music-Client": "YandexMusicAndroid/24023251",
           },
         },
-        { timeoutMs, retries, fetcher }
+        { timeoutMs, retries, fetcher, deadline }
       );
 
       const text = await response.text();
@@ -470,13 +520,17 @@ export async function fetchYandexPlaylist(
             if (parsed) parsedTracks.push(parsed);
           }
           const deduplicated = deduplicateTracks(parsedTracks);
-          return {
-            id: `${currentOwner}:${currentKind}`,
-            title: data.result.title ?? `Плейлист ${currentOwner}`,
-            owner: currentOwner,
-            trackCount: deduplicated.length,
-            tracks: deduplicated,
-          };
+          return cacheAndReturn(
+            normalized.canonicalUrl,
+            {
+              id: `${currentOwner}:${currentKind}`,
+              title: data.result.title ?? `Плейлист ${currentOwner}`,
+              owner: currentOwner,
+              trackCount: deduplicated.length,
+              tracks: deduplicated,
+            },
+            options.skipCache
+          );
         }
       }
     } catch (e) {
@@ -499,7 +553,7 @@ export async function fetchYandexPlaylist(
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     },
-    { timeoutMs, retries, fetcher }
+    { timeoutMs, retries, fetcher, deadline }
   );
 
   const html = await htmlResponse.text();
@@ -513,7 +567,7 @@ export async function fetchYandexPlaylist(
         options
       );
       if (nested.tracks.length > 0) {
-        return nested;
+        return cacheAndReturn(normalized.canonicalUrl, nested, options.skipCache);
       }
     } catch {
       // Use tracks extracted directly from HTML
@@ -531,11 +585,15 @@ export async function fetchYandexPlaylist(
     );
   }
 
-  return {
-    id: currentUuid ?? (extracted.kind ? `${extracted.owner}:${extracted.kind}` : "yandex-playlist"),
-    title: extracted.title ?? "Плейлист Яндекс Музыки",
-    owner: extracted.owner ?? currentOwner,
-    trackCount: extracted.tracks.length,
-    tracks: extracted.tracks,
-  };
+  return cacheAndReturn(
+    normalized.canonicalUrl,
+    {
+      id: currentUuid ?? (extracted.kind ? `${extracted.owner}:${extracted.kind}` : "yandex-playlist"),
+      title: extracted.title ?? "Плейлист Яндекс Музыки",
+      owner: extracted.owner ?? currentOwner,
+      trackCount: extracted.tracks.length,
+      tracks: extracted.tracks,
+    },
+    options.skipCache
+  );
 }

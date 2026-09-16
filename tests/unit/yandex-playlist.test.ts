@@ -4,6 +4,7 @@ import {
   extractFromHtmlState,
   fetchYandexPlaylist,
   YandexPlaylistError,
+  clearYandexPlaylistCache,
 } from "../../src/lib/yandex/playlist";
 
 describe("Yandex Music playlist URL normalization", () => {
@@ -173,5 +174,55 @@ describe("fetchYandexPlaylist error handling and deduplication", () => {
         retries: 1,
       })
     ).rejects.toThrowError(/не найден/i);
+  });
+
+  test("serves repeated playlist requests from in-memory cache without hitting fetcher", async () => {
+    clearYandexPlaylistCache();
+    const mockFetcher = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            playlist: {
+              title: "Кеш-тест",
+              visibility: "public",
+              tracks: [
+                {
+                  id: 1,
+                  title: "Track 1",
+                  artists: [{ name: "Artist 1" }],
+                },
+              ],
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+    );
+
+    const res1 = await fetchYandexPlaylist("https://music.yandex.ru/users/cache-user/playlists/10", {
+      fetcher: mockFetcher,
+      timeoutMs: 1000,
+      retries: 1,
+    });
+    expect(res1.title).toBe("Кеш-тест");
+    expect(mockFetcher).toHaveBeenCalledTimes(1);
+
+    // Second call to same URL should hit in-memory cache
+    const res2 = await fetchYandexPlaylist("https://music.yandex.ru/users/cache-user/playlists/10", {
+      fetcher: mockFetcher,
+      timeoutMs: 1000,
+      retries: 1,
+    });
+    expect(res2.title).toBe("Кеш-тест");
+    expect(mockFetcher).toHaveBeenCalledTimes(1); // Still 1!
+
+    // After clearing cache, it should hit fetcher again
+    clearYandexPlaylistCache();
+    await fetchYandexPlaylist("https://music.yandex.ru/users/cache-user/playlists/10", {
+      fetcher: mockFetcher,
+      timeoutMs: 1000,
+      retries: 1,
+    });
+    expect(mockFetcher).toHaveBeenCalledTimes(2);
   });
 });

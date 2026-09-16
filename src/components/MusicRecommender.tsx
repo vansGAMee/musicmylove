@@ -96,6 +96,7 @@ const TRANSLATIONS = {
     yandexNotFound: "Плейлист не найден. Проверьте правильность ссылки.",
     yandexPrivate: "Этот плейлист приватный. Сделайте его публичным в настройках.",
     yandexInvalidUrl: "Некорректная ссылка на плейлист Яндекс Музыки",
+    yandexRateLimited: "Слишком много запросов. Подождите немного перед повторным импортом.",
     yandexImportedSuccess: "Импортировано треков: {count}",
     yandexEmpty: "В плейлисте не найдено треков",
     importedBadge: "Импортировано: {count}",
@@ -173,6 +174,7 @@ const TRANSLATIONS = {
     yandexNotFound: "Playlist not found. Check the link.",
     yandexPrivate: "This playlist is private. Please make it public in settings.",
     yandexInvalidUrl: "Invalid Yandex Music playlist link",
+    yandexRateLimited: "Too many requests. Please wait a moment before trying again.",
     yandexImportedSuccess: "Imported tracks: {count}",
     yandexEmpty: "No tracks found in this playlist",
     importedBadge: "Imported: {count}",
@@ -656,15 +658,26 @@ export default function MusicRecommender() {
     setError("");
 
     try {
-      const res = await fetch("/api/yandex/playlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: cleanUrl }),
+      // Use GET first to leverage Vercel Edge CDN cache (0 serverless function executions on repeat requests)
+      let res = await fetch(`/api/yandex/playlist?url=${encodeURIComponent(cleanUrl)}`, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
       });
+
+      if (!res.ok && res.status !== 429 && res.status !== 404 && res.status !== 403) {
+        // Fallback to POST if GET fails
+        res = await fetch("/api/yandex/playlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: cleanUrl }),
+        });
+      }
+
       const data = await res.json();
       if (!res.ok) {
         let msg = data.error ?? t.errorRecommendationFailed;
-        if (data.code === "not_found") msg = t.yandexNotFound;
+        if (data.code === "rate_limited" || res.status === 429) msg = t.yandexRateLimited;
+        else if (data.code === "not_found") msg = t.yandexNotFound;
         else if (data.code === "private") msg = t.yandexPrivate;
         else if (data.code === "invalid_url") msg = t.yandexInvalidUrl;
         setYandexNotice(msg);
