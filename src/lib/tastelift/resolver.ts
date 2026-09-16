@@ -1,12 +1,15 @@
+import catalogJson from "../../../ml/tastelift-catalog.json";
 import { fetchWithRetry } from "../http";
 import { searchRecordingsForSeed } from "../listenbrainz";
 import type { Track } from "../types";
+import type { TasteLiftCatalogArtifact } from "./catalog";
 import { tasteSeedKey, type TasteSeedInput } from "./input";
 import { VersionedCache } from "../cache";
 
 export interface TasteResolverAdapters {
   searchRecordings: (query: string) => Promise<Track[]>;
   resolveLastFm?: (input: TasteSeedInput) => Promise<Track | null>;
+  resolveLocal?: (input: TasteSeedInput) => Track | null;
   cache?: VersionedCache<ResolvedTasteSeed>;
 }
 
@@ -65,6 +68,25 @@ const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000;
 const key = (value: string) => value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("en-US");
 const queryFor = (input: TasteSeedInput) => `${input.artist} ${input.title}`;
 
+const catalogIndex = new Map<string, Track>();
+const catalogSearchIndex = new Map<string, Track>();
+
+for (const t of (catalogJson as TasteLiftCatalogArtifact).tracks) {
+  const cKey = `${key(t.artist)}\u0000${key(t.title)}`;
+  const sKey = `${key(t.artist)} ${key(t.title)}`;
+  const existing = catalogIndex.get(cKey);
+  if (!existing || t.mbid < existing.mbid) {
+    const track: Track = {
+      mbid: t.mbid,
+      artist: t.artist,
+      title: t.title,
+      ...(t.release ? { release: t.release } : {}),
+    };
+    catalogIndex.set(cKey, track);
+    catalogSearchIndex.set(sKey, track);
+  }
+}
+
 function exactMatch(input: TasteSeedInput, tracks: readonly Track[]): Track | null {
   return tracks
     .filter((track) => key(track.artist) === key(input.artist) && key(track.title) === key(input.title))
@@ -84,6 +106,15 @@ function withInput(input: TasteSeedInput, result: ResolvedTasteSeed): ResolvedTa
 }
 
 async function resolveTasteSeed(input: TasteSeedInput, adapters: TasteResolverAdapters): Promise<ResolvedTasteSeed> {
+  if (adapters.resolveLocal) {
+    try {
+      const localMatch = adapters.resolveLocal(input);
+      if (localMatch) return { input, status: "resolved", track: localMatch, source: "listenbrainz" };
+    } catch {
+      // fallback to upstream adapters
+    }
+  }
+
   try {
     const listenBrainzMatch = exactMatch(input, await adapters.searchRecordings(queryFor(input)));
     if (listenBrainzMatch) return { input, status: "resolved", track: listenBrainzMatch, source: "listenbrainz" };
@@ -152,11 +183,33 @@ export function parseLastFmTrack(value: unknown): Track | null {
 }
 
 export function createTasteResolverAdapters(lastFmApiKey = process.env.LASTFM_API_KEY): TasteResolverAdapters {
+  let liveSearchCount = 0;
+  const MAX_LIVE_SEARCHES = 15;
+
   return {
-    searchRecordings: (query) => searchRecordingsForSeed(query),
+    resolveLocal: (input: TasteSeedInput): Track | null => {
+      const normKey = `${key(input.artist)}\u0000${key(input.title)}`;
+      return catalogIndex.get(normKey) ?? null;
+    },
+    searchRecordings: async (query: string) => {
+      const normQuery = key(query);
+      const catalogMatch = catalogSearchIndex.get(normQuery);
+      if (catalogMatch) {
+        return [catalogMatch];
+      }
+      if (liveSearchCount >= MAX_LIVE_SEARCHES) {
+        return [];
+      }
+      liveSearchCount++;
+      return searchRecordingsForSeed(query);
+    },
     cache: resolverCache,
     ...(lastFmApiKey ? {
       resolveLastFm: async (input: TasteSeedInput): Promise<Track | null> => {
+        if (liveSearchCount >= MAX_LIVE_SEARCHES) {
+          return null;
+        }
+        liveSearchCount++;
         const url = new URL("https://ws.audioscrobbler.com/2.0/");
         url.search = new URLSearchParams({ method: "track.getInfo", api_key: lastFmApiKey, artist: input.artist, track: input.title, format: "json" }).toString();
         return parseLastFmTrack(await (await fetchWithRetry(url.toString())).json());

@@ -46,12 +46,12 @@ test("prefetches each selection and automatically returns results after the fift
   expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"))).toHaveLength(1);
 });
 
-test("handles uploading 417 Russian tracks, passes at most 5 seeds to tastelift, and never renders an iframe", async () => {
+test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, and never renders an iframe", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("/api/tastelift")) {
       const body = JSON.parse(String(init?.body));
-      expect(body.songs.length).toBeLessThanOrEqual(5);
+      expect(body.songs.length).toBe(417);
       return new Response(JSON.stringify({
         recommendations: Array.from({ length: 40 }, (_, index) => ({
           mbid: `candidate-${index}`,
@@ -102,11 +102,11 @@ test("handles uploading 417 Russian tracks, passes at most 5 seeds to tastelift,
     await Promise.resolve();
   });
 
-  // Verify tastelift was called with at most 5 seeds
+  // Verify tastelift was called with all 417 seeds
   const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
   expect(tasteliftCalls).toHaveLength(1);
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
-  expect(sentPayload.songs).toHaveLength(5);
+  expect(sentPayload.songs).toHaveLength(417);
   expect(sentPayload.songs[0].artist).toBe("Михаил Круг");
   expect(sentPayload.songs[0].title).toBe("Фраер");
 
@@ -138,7 +138,7 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
     }
     if (url.startsWith("/api/tastelift")) {
       const body = JSON.parse(String(init?.body));
-      expect(body.songs.length).toBeLessThanOrEqual(5);
+      expect(body.songs.length).toBe(50);
       return new Response(JSON.stringify({
         recommendations: Array.from({ length: 40 }, (_, index) => ({
           mbid: `candidate-${index}`,
@@ -175,11 +175,11 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
     fireEvent.click(submitBtn);
   });
 
-  // Verify tastelift received at most 5 seeds
+  // Verify tastelift received all 50 seeds
   const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
   expect(tasteliftCalls).toHaveLength(1);
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
-  expect(sentPayload.songs).toHaveLength(5);
+  expect(sentPayload.songs).toHaveLength(50);
 
   // Verify recommendations loaded
   expect(screen.getAllByText("YM Рекомендация 0").length).toBeGreaterThanOrEqual(1);

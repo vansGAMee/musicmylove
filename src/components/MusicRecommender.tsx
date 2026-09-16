@@ -431,7 +431,7 @@ export default function MusicRecommender() {
       if (typeof payloadBody === "object" && payloadBody !== null) {
         const bodyObj = payloadBody as { songs?: Array<{ artist: string; title: string; spotify_url?: string }> };
         if (Array.isArray(bodyObj.songs)) {
-          const baseSongs = bodyObj.songs.slice(0, 5);
+          const baseSongs = bodyObj.songs.slice(0, 500);
           const existingKeys = new Set(
             baseSongs.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`)
           );
@@ -448,7 +448,7 @@ export default function MusicRecommender() {
           }
           bodyToSend = {
             ...bodyObj,
-            songs: [...baseSongs, ...extraLikedSongs].slice(0, 10),
+            songs: [...baseSongs, ...extraLikedSongs].slice(0, 500),
           };
         }
       }
@@ -485,7 +485,7 @@ export default function MusicRecommender() {
         throw new Error(payload?.error ?? t.errorRecommendationFailed);
       }
       if (payload.seeds && payload.seeds.length > 0) {
-        const resolvedSeeds: SeedTrack[] = payload.seeds.slice(0, 5).map((s, idx) => {
+        const resolvedSeeds: SeedTrack[] = payload.seeds.slice(0, 500).map((s, idx) => {
           const artist = s.track?.artist ?? s.input?.artist ?? s.artist ?? "";
           const title = s.track?.title ?? s.input?.title ?? s.title ?? "";
           return {
@@ -563,7 +563,7 @@ export default function MusicRecommender() {
 
       if (parsedItems.length === 0) return;
 
-      const seedTracks: SeedTrack[] = parsedItems.slice(0, 5).map((t, idx) => ({
+      const seedTracks: SeedTrack[] = parsedItems.slice(0, 500).map((t, idx) => ({
         mbid: `seed-shared-${idx}-${Date.now()}`,
         title: t.title,
         artist: t.artist,
@@ -575,7 +575,7 @@ export default function MusicRecommender() {
       setImportedSeeds(parsedItems);
 
       if (parsedItems.length >= 5) {
-        void requestRecommendations({ songs: parsedItems });
+        void requestRecommendations({ songs: parsedItems.slice(0, 500) });
       }
     } catch {
       // ignore
@@ -593,7 +593,7 @@ export default function MusicRecommender() {
         ...next.map((seed) => ({ artist: seed.artist, title: seed.title })),
         ...importedSeeds,
       ];
-      await requestRecommendations({ songs: allSongs.slice(0, 5) });
+      await requestRecommendations({ songs: allSongs.slice(0, 500) });
     }
   };
 
@@ -610,7 +610,7 @@ export default function MusicRecommender() {
         return;
       }
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 5).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 500).map((s, idx) => ({
         mbid: `seed-upload-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -623,7 +623,7 @@ export default function MusicRecommender() {
 
       if (parsedSongs.length >= 5) {
         await requestRecommendations({
-          songs: parsedSongs.slice(0, 5).map((s) => ({
+          songs: parsedSongs.slice(0, 500).map((s) => ({
             artist: s.artist,
             title: s.title,
             ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
@@ -794,7 +794,7 @@ export default function MusicRecommender() {
 
       setImportedSeeds(parsedSongs);
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 5).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 500).map((s, idx) => ({
         mbid: `seed-ym-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -806,7 +806,7 @@ export default function MusicRecommender() {
       setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
 
       await requestRecommendations({
-        songs: parsedSongs.slice(0, 5).map((s) => ({
+        songs: parsedSongs.slice(0, 500).map((s) => ({
           artist: s.artist,
           title: s.title,
         })),

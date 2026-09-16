@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { parseSearch } from "../../src/lib/listenbrainz";
-import { LastFmResponseError, parseLastFmTrack, resolveTasteSeeds, type ResolvedTasteSeed, type TasteResolverAdapters } from "../../src/lib/tastelift/resolver";
+import { createTasteResolverAdapters, LastFmResponseError, parseLastFmTrack, resolveTasteSeeds, type ResolvedTasteSeed, type TasteResolverAdapters } from "../../src/lib/tastelift/resolver";
 import type { TasteSeedInput } from "../../src/lib/tastelift/input";
 import { VersionedCache } from "../../src/lib/cache";
 
@@ -176,4 +176,31 @@ test("bounds adapter concurrency and caches resolved seed outcomes", async () =>
   expect(maximumActive).toBeLessThanOrEqual(2);
   await resolveTasteSeeds(batch, adapters, { cache, maxConcurrency: 2 });
   expect(calls).toBe(12);
+});
+
+test("createTasteResolverAdapters resolves catalog tracks locally and bounds live searches", async () => {
+  const adapters = createTasteResolverAdapters();
+  const knownSeed: TasteSeedInput = { artist: "Radiohead", title: "Karma Police" };
+  const unknownSeeds: TasteSeedInput[] = Array.from({ length: 30 }, (_, i) => ({
+    artist: `Unknown Artist ${i}`,
+    title: `Unknown Song ${i}`,
+  }));
+
+  const results = await resolveTasteSeeds([knownSeed, ...unknownSeeds], adapters);
+  expect(results).toHaveLength(31);
+
+  // Known track is resolved from local catalog with its MBID
+  expect(results[0]).toEqual({
+    input: knownSeed,
+    status: "resolved",
+    track: expect.objectContaining({
+      artist: "Radiohead",
+      title: "Karma Police",
+      mbid: "9e2ad5bc-c6f9-40d2-a36f-3122ee2072a3",
+    }),
+    source: "listenbrainz",
+  });
+
+  // All 31 seeds must be resolved (none unresolved/errored)
+  expect(results.every((r) => r.status === "resolved")).toBe(true);
 });
