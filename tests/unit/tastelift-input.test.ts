@@ -154,3 +154,148 @@ test("supports allowPartial option for 1-4 tracks without error", () => {
   expect(parsed[1].artist).toBe("Massive Attack");
 });
 
+test("accepts M3U / M3U8 playlist with #EXTINF directives", () => {
+  const m3u = `#EXTM3U
+#EXTINF:245,Queen - Bohemian Rhapsody
+/music/queen/bohemian.mp3
+#EXTINF:180,The Beatles - Yesterday
+/music/beatles/yesterday.mp3
+#EXTINF:300,Pink Floyd - Comfortably Numb
+/music/pink_floyd/comfortably.mp3
+#EXTINF:210,David Bowie - Heroes
+/music/bowie/heroes.mp3
+#EXTINF:260,Led Zeppelin - Stairway to Heaven
+/music/zeppelin/stairway.mp3`;
+
+  const parsed = parseTasteInput(m3u);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Queen", title: "Bohemian Rhapsody" });
+  expect(parsed[1]).toEqual({ artist: "The Beatles", title: "Yesterday" });
+  expect(parsed[2]).toEqual({ artist: "Pink Floyd", title: "Comfortably Numb" });
+});
+
+test("accepts PLS playlist format", () => {
+  const pls = `[playlist]
+File1=http://stream.example.com/1
+Title1=Queen - Bohemian Rhapsody
+Length1=245
+File2=http://stream.example.com/2
+Title2=The Beatles - Yesterday
+Length2=180
+File3=http://stream.example.com/3
+Title3=Pink Floyd - Comfortably Numb
+Length3=300
+File4=http://stream.example.com/4
+Title4=David Bowie - Heroes
+Length4=210
+File5=http://stream.example.com/5
+Title5=Led Zeppelin - Stairway to Heaven
+Length5=260
+NumberOfEntries=5
+Version=2`;
+
+  const parsed = parseTasteInput(pls);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Queen", title: "Bohemian Rhapsody" });
+  expect(parsed[4]).toEqual({ artist: "Led Zeppelin", title: "Stairway to Heaven" });
+});
+
+test("accepts numbered and bulleted plain text tracklists", () => {
+  const numbered = `1. Queen - Bohemian Rhapsody
+02) The Beatles - Yesterday
+[3] Pink Floyd - Comfortably Numb
+4 - David Bowie - Heroes
+• Led Zeppelin - Stairway to Heaven`;
+
+  const parsed = parseTasteInput(numbered);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Queen", title: "Bohemian Rhapsody" });
+  expect(parsed[1]).toEqual({ artist: "The Beatles", title: "Yesterday" });
+  expect(parsed[2]).toEqual({ artist: "Pink Floyd", title: "Comfortably Numb" });
+  expect(parsed[3]).toEqual({ artist: "David Bowie", title: "Heroes" });
+  expect(parsed[4]).toEqual({ artist: "Led Zeppelin", title: "Stairway to Heaven" });
+});
+
+test("accepts Russian CSV with Исполнитель and Название headers and semicolon delimiter", () => {
+  const csv = `Исполнитель;Название;Альбом
+Кино;Группа крови;Группа крови
+Наутилус Помпилиус;Крылья;Крылья
+ДДТ;Что такое осень;Актриса Весна
+Аквариум;Поезд в огне;Равноденствие
+Сплин;Моё сердце;25 кадр`;
+
+  const parsed = parseTasteInput(csv);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Кино", title: "Группа крови" });
+  expect(parsed[1]).toEqual({ artist: "Наутилус Помпилиус", title: "Крылья" });
+  expect(parsed[4]).toEqual({ artist: "Сплин", title: "Моё сердце" });
+});
+
+test("accepts TSV format without headers", () => {
+  const tsv = `Queen\tBohemian Rhapsody
+The Beatles\tYesterday
+Pink Floyd\tComfortably Numb
+David Bowie\tHeroes
+Led Zeppelin\tStairway to Heaven`;
+
+  const parsed = parseTasteInput(tsv);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Queen", title: "Bohemian Rhapsody" });
+  expect(parsed[1]).toEqual({ artist: "The Beatles", title: "Yesterday" });
+});
+
+test("accepts Apple Music JSON export format with data[].attributes", () => {
+  const appleJson = {
+    data: [
+      { attributes: { artistName: "Radiohead", name: "Karma Police" } },
+      { attributes: { artistName: "Portishead", name: "Glory Box" } },
+      { attributes: { artistName: "Massive Attack", name: "Angel" } },
+      { attributes: { artistName: "Björk", name: "Army of Me" } },
+      { attributes: { artistName: "M83", name: "Midnight City" } },
+    ],
+  };
+
+  const parsed = parseTasteInput(appleJson);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Radiohead", title: "Karma Police" });
+  expect(parsed[1]).toEqual({ artist: "Portishead", title: "Glory Box" });
+});
+
+test("accepts Last.fm JSON format with recenttracks.track and nested artist name", () => {
+  const lastfmJson = {
+    recenttracks: {
+      track: [
+        { artist: { "#text": "Radiohead" }, name: "Karma Police" },
+        { artist: { name: "Portishead" }, name: "Glory Box" },
+        { artist: { "#text": "Massive Attack" }, name: "Angel" },
+        { artist: { name: "Björk" }, name: "Army of Me" },
+        { artist: { "#text": "M83" }, name: "Midnight City" },
+      ],
+    },
+  };
+
+  const parsed = parseTasteInput(lastfmJson);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Radiohead", title: "Karma Police" });
+  expect(parsed[1]).toEqual({ artist: "Portishead", title: "Glory Box" });
+});
+
+test("accepts objects with track instead of title and Russian keys", () => {
+  const customJson = [
+    { artist: "Queen", track: "Bohemian Rhapsody" },
+    { Artist: "The Beatles", Track: "Yesterday" },
+    { Исполнитель: "Кино", Название: "Группа крови" },
+    { author: "David Bowie", song: "Heroes" },
+    { performer: "Led Zeppelin", Title: "Stairway to Heaven" },
+  ];
+
+  const parsed = parseTasteInput(customJson);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Queen", title: "Bohemian Rhapsody" });
+  expect(parsed[1]).toEqual({ artist: "The Beatles", title: "Yesterday" });
+  expect(parsed[2]).toEqual({ artist: "Кино", title: "Группа крови" });
+  expect(parsed[3]).toEqual({ artist: "David Bowie", title: "Heroes" });
+  expect(parsed[4]).toEqual({ artist: "Led Zeppelin", title: "Stairway to Heaven" });
+});
+
+

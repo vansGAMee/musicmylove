@@ -26,7 +26,11 @@ const normalizeText = (value: string) => value.normalize("NFKC").replace(/\s+/gu
 
 function extractArtistAndTitle(entry: unknown): { artist?: string; title?: string; spotifyUrl?: string; duration?: number } {
   if (typeof entry === "string") {
-    const match = /^(.+?)\s*(?:[-–—:]|\s+by\s+)\s*(.+)$/iu.exec(entry);
+    const cleanEntry = entry
+      .replace(/^\s*(?:\[\d+\]|\d+[\.\)\-:]|\d+\s+[-–—])\s*/u, "")
+      .replace(/^\s*[•\*\-]\s+/u, "")
+      .trim();
+    const match = /^(.+?)\s*(?:[-–—:]|\s+by\s+)\s*(.+)$/iu.exec(cleanEntry);
     if (match) {
       return { artist: normalizeText(match[1]), title: normalizeText(match[2]) };
     }
@@ -34,12 +38,20 @@ function extractArtistAndTitle(entry: unknown): { artist?: string; title?: strin
   }
   if (!object(entry)) return {};
 
-  const trackObj = (object(entry.track) ? entry.track : entry) as Record<string, unknown>;
+  const trackObj = (
+    object(entry.attributes)
+      ? entry.attributes
+      : object(entry.track)
+      ? entry.track
+      : entry
+  ) as Record<string, unknown>;
 
   let artist: string | undefined;
   if (typeof trackObj.master_metadata_album_artist_name === "string") artist = trackObj.master_metadata_album_artist_name;
   else if (typeof trackObj.artistName === "string") artist = trackObj.artistName;
   else if (typeof trackObj.artist === "string") artist = trackObj.artist;
+  else if (object(trackObj.artist) && typeof trackObj.artist.name === "string") artist = trackObj.artist.name;
+  else if (object(trackObj.artist) && typeof trackObj.artist["#text"] === "string") artist = trackObj.artist["#text"] as string;
   else if (typeof trackObj["Artist Name(s)"] === "string") artist = trackObj["Artist Name(s)"] as string;
   else if (typeof trackObj["Artist Name"] === "string") artist = trackObj["Artist Name"] as string;
   else if (typeof trackObj.Artist === "string") artist = trackObj.Artist as string;
@@ -48,19 +60,32 @@ function extractArtistAndTitle(entry: unknown): { artist?: string; title?: strin
     const first = trackObj.artists[0];
     if (typeof first === "string") artist = first;
     else if (object(first) && typeof first.name === "string") artist = first.name;
+    else if (object(first) && object(first.artist) && typeof (first.artist as Record<string, unknown>).name === "string") artist = (first.artist as Record<string, unknown>).name as string;
   } else if (typeof trackObj.author === "string") artist = trackObj.author as string;
+  else if (object(trackObj.author) && typeof trackObj.author.name === "string") artist = trackObj.author.name;
   else if (typeof trackObj.performer === "string") artist = trackObj.performer as string;
+  else if (object(trackObj.performer) && typeof trackObj.performer.name === "string") artist = trackObj.performer.name;
+  else if (typeof trackObj.byArtist === "string") artist = trackObj.byArtist;
+  else if (object(trackObj.byArtist) && typeof trackObj.byArtist.name === "string") artist = trackObj.byArtist.name;
+  else if (typeof trackObj["Исполнитель"] === "string") artist = trackObj["Исполнитель"] as string;
+  else if (typeof trackObj["Артист"] === "string") artist = trackObj["Артист"] as string;
+  else if (typeof trackObj["Автор"] === "string") artist = trackObj["Автор"] as string;
 
   let title: string | undefined;
   if (typeof trackObj.master_metadata_track_name === "string") title = trackObj.master_metadata_track_name;
   else if (typeof trackObj.trackName === "string") title = trackObj.trackName;
   else if (typeof trackObj.title === "string") title = trackObj.title;
+  else if (typeof trackObj.track === "string") title = trackObj.track;
+  else if (typeof trackObj.Track === "string") title = trackObj.Track as string;
   else if (typeof trackObj["Track Name"] === "string") title = trackObj["Track Name"] as string;
   else if (typeof trackObj.name === "string") title = trackObj.name as string;
   else if (typeof trackObj.Title === "string") title = trackObj.Title as string;
   else if (typeof trackObj.song === "string") title = trackObj.song as string;
   else if (typeof trackObj.Song === "string") title = trackObj.Song as string;
   else if (typeof trackObj.track_name === "string") title = trackObj.track_name as string;
+  else if (typeof trackObj["Название"] === "string") title = trackObj["Название"] as string;
+  else if (typeof trackObj["Трек"] === "string") title = trackObj["Трек"] as string;
+  else if (typeof trackObj["Песня"] === "string") title = trackObj["Песня"] as string;
 
   let spotifyUrl: string | undefined;
   const uri = typeof trackObj.spotify_track_uri === "string" ? trackObj.spotify_track_uri : typeof trackObj.uri === "string" ? trackObj.uri : "";
@@ -181,13 +206,60 @@ export function parseFileContentToSongs(text: string, options?: { allowPartial?:
     return parseTasteInput(parsed, options);
   } catch (error) {
     if (error instanceof TasteInputError) {
-      // If it was valid JSON but threw out_of_range or duplicate, re-throw
-      throw error;
+      if (error.issues.some((issue) => issue.code === "out_of_range" || issue.code === "duplicate")) {
+        throw error;
+      }
     }
   }
 
-  // 2. CSV / TXT parsing
-  const lines = content.split(/\r?\n/u).map((l) => l.trim()).filter(Boolean);
+  // 2. CSV / TSV / TXT / M3U / PLS parsing
+  const rawLines = content.split(/\r?\n/u).map((l) => l.trim()).filter(Boolean);
+  if (rawLines.length === 0) return [];
+
+  // Check for M3U / M3U8
+  const isM3u = rawLines.some((l) => l.startsWith("#EXTM3U") || l.startsWith("#EXTINF:"));
+  if (isM3u) {
+    const rawRows: Record<string, unknown>[] = [];
+    for (const rawLine of rawLines) {
+      if (rawLine.startsWith("#EXTINF:")) {
+        const commaIdx = rawLine.indexOf(",");
+        const trackStr = (commaIdx !== -1 ? rawLine.slice(commaIdx + 1) : rawLine.replace("#EXTINF:", "")).trim();
+        const extracted = extractArtistAndTitle(trackStr);
+        if (extracted.artist && extracted.title) {
+          rawRows.push({ artist: extracted.artist, title: extracted.title });
+        }
+      } else if (!rawLine.startsWith("#")) {
+        const cleanName = rawLine.replace(/\.[a-z0-9]{2,4}$/iu, "").trim();
+        const extracted = extractArtistAndTitle(cleanName);
+        if (extracted.artist && extracted.title) {
+          rawRows.push({ artist: extracted.artist, title: extracted.title });
+        }
+      }
+    }
+    if (rawRows.length > 0) {
+      return parseTasteInput(rawRows, options);
+    }
+  }
+
+  // Check for PLS playlist
+  const isPls = rawLines.some((l) => /^\[playlist\]/i.test(l) || /^Title\d+=/i.test(l));
+  if (isPls) {
+    const rawRows: Record<string, unknown>[] = [];
+    for (const rawLine of rawLines) {
+      const match = /^Title\d+\s*=\s*(.+)$/i.exec(rawLine);
+      if (match) {
+        const extracted = extractArtistAndTitle(match[1].trim());
+        if (extracted.artist && extracted.title) {
+          rawRows.push({ artist: extracted.artist, title: extracted.title });
+        }
+      }
+    }
+    if (rawRows.length > 0) {
+      return parseTasteInput(rawRows, options);
+    }
+  }
+
+  const lines = rawLines.filter((l) => !l.startsWith("#"));
   if (lines.length === 0) return [];
 
   const firstLine = lines[0];
@@ -195,7 +267,17 @@ export function parseFileContentToSongs(text: string, options?: { allowPartial?:
   const headerCols = parseCsvLine(firstLine, delimiter).map((col) => col.toLowerCase().replace(/["']/gu, "").trim());
 
   const isHeader = headerCols.some((col) =>
-    col.includes("artist") || col.includes("track") || col.includes("title") || col.includes("song") || col.includes("spotify")
+    col.includes("artist") ||
+    col.includes("track") ||
+    col.includes("title") ||
+    col.includes("song") ||
+    col.includes("spotify") ||
+    col.includes("исполнитель") ||
+    col.includes("артист") ||
+    col.includes("автор") ||
+    col.includes("название") ||
+    col.includes("трек") ||
+    col.includes("песня")
   );
 
   let artistIdx = -1;
@@ -204,13 +286,30 @@ export function parseFileContentToSongs(text: string, options?: { allowPartial?:
 
   if (isHeader) {
     spotifyIdx = headerCols.findIndex((col) => col.includes("spotify") || col === "id" || col.includes("track id"));
-    artistIdx = headerCols.findIndex((col) => col.includes("artist") || col.includes("author") || col.includes("performer"));
-    titleIdx = headerCols.findIndex((col, i) => i !== spotifyIdx && i !== artistIdx && (col === "track name" || col === "track" || col === "title" || col === "song" || col === "name"));
+    artistIdx = headerCols.findIndex((col) =>
+      col.includes("artist") || col.includes("author") || col.includes("performer") ||
+      col.includes("исполнитель") || col.includes("артист") || col.includes("автор")
+    );
+    titleIdx = headerCols.findIndex((col, i) =>
+      i !== spotifyIdx && i !== artistIdx && (
+        col === "track name" || col === "track" || col === "title" || col === "song" || col === "name" ||
+        col === "название" || col === "трек" || col === "песня"
+      )
+    );
     if (titleIdx === -1) {
-      titleIdx = headerCols.findIndex((col, i) => i !== spotifyIdx && i !== artistIdx && (col.includes("track name") || col.includes("title") || col.includes("song")));
+      titleIdx = headerCols.findIndex((col, i) =>
+        i !== spotifyIdx && i !== artistIdx && (
+          col.includes("track name") || col.includes("title") || col.includes("song") ||
+          col.includes("название") || col.includes("трек") || col.includes("песня")
+        )
+      );
     }
     if (titleIdx === -1) {
-      titleIdx = headerCols.findIndex((col, i) => i !== spotifyIdx && i !== artistIdx && (col.includes("track") || col.includes("name")));
+      titleIdx = headerCols.findIndex((col, i) =>
+        i !== spotifyIdx && i !== artistIdx && (
+          col.includes("track") || col.includes("name")
+        )
+      );
     }
   }
 
@@ -243,17 +342,28 @@ export function parseFileContentToSongs(text: string, options?: { allowPartial?:
         rawRows.push({ artist, title, ...(spotifyUrl ? { spotify_url: spotifyUrl } : {}) });
       }
     } else {
-      const match = /^(.+?)\s*(?:[-–—:]|\s+by\s+)\s*(.+)$/iu.exec(line);
+      const cleanLine = line
+        .replace(/^\s*(?:\[\d+\]|\d+[\.\)\-:]|\d+\s+[-–—])\s*/u, "")
+        .replace(/^\s*[•\*\-]\s+/u, "")
+        .trim();
+
+      const match = /^(.+?)\s*(?:[-–—:]|\s+by\s+)\s*(.+)$/iu.exec(cleanLine);
       if (match) {
         const artist = match[1].trim().replace(/^["']|["']$/gu, "");
         const title = match[2].trim().replace(/^["']|["']$/gu, "");
         if (artist && title) rawRows.push({ artist, title });
       } else {
-        const cols = parseCsvLine(line, delimiter);
+        const cols = parseCsvLine(cleanLine, delimiter);
         if (cols.length >= 2) {
-          const artist = cols[0].replace(/^["']|["']$/gu, "").trim();
-          const title = cols[1].replace(/^["']|["']$/gu, "").trim();
-          if (artist && title) rawRows.push({ artist, title });
+          if (/^\d+$/u.test(cols[0]) && cols.length >= 3) {
+            const artist = cols[1].replace(/^["']|["']$/gu, "").trim();
+            const title = cols[2].replace(/^["']|["']$/gu, "").trim();
+            if (artist && title) rawRows.push({ artist, title });
+          } else {
+            const artist = cols[0].replace(/^["']|["']$/gu, "").trim();
+            const title = cols[1].replace(/^["']|["']$/gu, "").trim();
+            if (artist && title) rawRows.push({ artist, title });
+          }
         }
       }
     }
@@ -296,6 +406,48 @@ export function parseTasteInput(value: unknown, options?: { allowPartial?: boole
     } else if (object(value.playlist) && Array.isArray((value.playlist as Record<string, unknown>).tracks)) {
       rawList = (value.playlist as Record<string, unknown>).tracks as unknown[];
       isHistory = true;
+    } else if (object(value.playlist) && Array.isArray((value.playlist as Record<string, unknown>).items)) {
+      rawList = (value.playlist as Record<string, unknown>).items as unknown[];
+      isHistory = true;
+    } else if (object(value.result) && Array.isArray((value.result as Record<string, unknown>).tracks)) {
+      rawList = (value.result as Record<string, unknown>).tracks as unknown[];
+      isHistory = true;
+    } else if (object(value.results) && Array.isArray((value.results as Record<string, unknown>).track)) {
+      rawList = (value.results as Record<string, unknown>).track as unknown[];
+      isHistory = true;
+    } else if (object(value.results) && Array.isArray((value.results as Record<string, unknown>).tracks)) {
+      rawList = (value.results as Record<string, unknown>).tracks as unknown[];
+      isHistory = true;
+    } else if (object(value.recenttracks) && Array.isArray((value.recenttracks as Record<string, unknown>).track)) {
+      rawList = (value.recenttracks as Record<string, unknown>).track as unknown[];
+      isHistory = true;
+    } else if (object(value.library) && Array.isArray((value.library as Record<string, unknown>).tracks)) {
+      rawList = (value.library as Record<string, unknown>).tracks as unknown[];
+      isHistory = true;
+    } else {
+      // Automatic fallback scan: search for any array in value that contains track-like objects
+      for (const val of Object.values(value)) {
+        if (Array.isArray(val) && val.length > 0) {
+          const sample = extractArtistAndTitle(val[0]);
+          if (sample.artist && sample.title) {
+            rawList = val;
+            isHistory = true;
+            break;
+          }
+        } else if (object(val)) {
+          for (const nestedVal of Object.values(val)) {
+            if (Array.isArray(nestedVal) && nestedVal.length > 0) {
+              const sample = extractArtistAndTitle(nestedVal[0]);
+              if (sample.artist && sample.title) {
+                rawList = nestedVal;
+                isHistory = true;
+                break;
+              }
+            }
+          }
+          if (rawList) break;
+        }
+      }
     }
   }
 

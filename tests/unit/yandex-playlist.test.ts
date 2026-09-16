@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
   normalizeYandexPlaylistUrl,
   extractFromHtmlState,
@@ -166,6 +166,10 @@ describe("extractFromHtmlState - JSON-LD and Schema extraction", () => {
 });
 
 describe("fetchYandexPlaylist - API response handling", () => {
+  beforeEach(() => {
+    clearYandexPlaylistCache();
+  });
+
   test("returns tracks successfully from public handlers endpoint", async () => {
     const mockFetcher = vi.fn().mockResolvedValue(
       new Response(

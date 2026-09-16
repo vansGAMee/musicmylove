@@ -5,7 +5,7 @@ import type { RankedTrack, SeedTrack, Track } from "../lib/types";
 import { downloadTasteCardPng } from "../lib/exportCard";
 import { parseFileContentToSongs } from "../lib/tastelift/input";
 
-const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT"] as const;
+const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT", "M3U"] as const;
 
 interface TasteLiftApiRecommendation {
   mbid: string;
@@ -39,14 +39,14 @@ const TRANSLATIONS = {
     importEyebrow: "Импорт",
     yourLibrary: "Твоя медиатека",
     dropzoneLabel: "Перетащите файл сюда",
-    dropzoneSublabel: "JSON, CSV или TXT список треков",
+    dropzoneSublabel: "JSON, CSV, TXT или M3U список треков",
     chooseFile: "Выбрать файл",
     manualSearch: "Ручной поиск",
     searchPlaceholder: "Поиск трека или исполнителя…",
     searchAria: "Поиск песни",
     readingTaste: "Считывание вашего вкуса…",
     back: "← Назад",
-    uploadAria: "Загрузить файл с треками (JSON, CSV, TXT)",
+    uploadAria: "Загрузить файл с треками (JSON, CSV, TXT, M3U)",
     tracksCountSuffix: "треков",
     playlistEyebrow: "Плейлист",
     myPlaylist: "Мой плейлист",
@@ -103,8 +103,8 @@ const TRANSLATIONS = {
     importedBadge: "Импортировано: {count}",
     moreTracksEllipsis: "+ ещё {count}…",
     shareDisabledTooltip: "Сначала добавьте свои треки, чтобы поделиться вкусом",
-    errorInvalidJson: "Неверный формат файла. Загрузите JSON, CSV или TXT со списком треков.",
-    errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON, CSV или TXT.",
+    errorInvalidJson: "Неверный формат файла. Загрузите JSON, CSV, TXT или M3U список треков.",
+    errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON, CSV, TXT или M3U.",
     errorNeedMoreSeeds: "Найдено треков: {count}. Добавьте еще через поиск ниже до 5.",
     errorRecommendationFailed: "Ошибка получения рекомендаций",
   },
@@ -125,7 +125,7 @@ const TRANSLATIONS = {
     searchAria: "Search for a song",
     readingTaste: "Reading the shape of your taste…",
     back: "← Back",
-    uploadAria: "Upload track file (JSON, CSV, TXT)",
+    uploadAria: "Upload track file (JSON, CSV, TXT, M3U)",
     tracksCountSuffix: "tracks",
     playlistEyebrow: "playlist",
     myPlaylist: "My Playlist",
@@ -182,8 +182,8 @@ const TRANSLATIONS = {
     importedBadge: "Imported: {count}",
     moreTracksEllipsis: "+ {count} more…",
     shareDisabledTooltip: "Import or select your tracks first to share taste",
-    errorInvalidJson: "Invalid file format. Please upload a JSON, CSV, or TXT tracklist.",
-    errorCouldNotParse: "Could not parse file. Make sure it is valid JSON, CSV, or TXT.",
+    errorInvalidJson: "Invalid file format. Please upload a JSON, CSV, TXT, or M3U tracklist.",
+    errorCouldNotParse: "Could not parse file. Make sure it is valid JSON, CSV, TXT, or M3U.",
     errorNeedMoreSeeds: "Found {count} tracks. Add more via search below to reach 5.",
     errorRecommendationFailed: "TasteLift recommendation failed",
   },
@@ -622,19 +622,42 @@ export default function MusicRecommender() {
     }
   };
 
+  const readUploadedFileAsText = async (file: File): Promise<string> => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+      const text = utf8Decoder.decode(buffer);
+      const replacementCount = (text.match(/\uFFFD/gu) || []).length;
+      if (replacementCount > 0) {
+        try {
+          const cp1251Decoder = new TextDecoder("windows-1251");
+          const cp1251Text = cp1251Decoder.decode(buffer);
+          const cp1251Replacements = (cp1251Text.match(/\uFFFD/gu) || []).length;
+          if (cp1251Replacements < replacementCount) {
+            return cp1251Text;
+          }
+        } catch {
+          // Keep UTF-8 text
+        }
+      }
+      return text;
+    } catch {
+      return await file.text();
+    }
+  };
+
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.target;
     const file = input.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      void handleUploadedContent(text);
-    };
-    reader.onloadend = () => {
-      input.value = "";
-    };
-    reader.readAsText(file);
+    void (async () => {
+      try {
+        const text = await readUploadedFileAsText(file);
+        await handleUploadedContent(text);
+      } finally {
+        input.value = "";
+      }
+    })();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -642,12 +665,10 @@ export default function MusicRecommender() {
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      void handleUploadedContent(text);
-    };
-    reader.readAsText(file);
+    void (async () => {
+      const text = await readUploadedFileAsText(file);
+      await handleUploadedContent(text);
+    })();
   };
 
   const handleYandexImport = async (e: React.FormEvent) => {
@@ -1087,7 +1108,7 @@ export default function MusicRecommender() {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,.csv,.txt,application/json,text/csv,text/plain"
+              accept=".json,.csv,.tsv,.txt,.m3u,.m3u8,.pls,application/json,text/csv,text/tab-separated-values,text/plain,audio/x-mpegurl"
               style={{ display: "none" }}
               onChange={handleFileUpload}
               id="json-file-input"

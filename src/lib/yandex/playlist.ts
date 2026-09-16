@@ -191,6 +191,10 @@ async function fetchWithBackoff(
         },
       });
 
+      if (!response) {
+        throw new YandexPlaylistError("upstream_error", "Не удалось связаться с сервером Яндекс Музыки");
+      }
+
       if (response.status === 404) {
         throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
       }
@@ -307,47 +311,182 @@ function deduplicateTracks(tracks: YandexTrack[]): YandexTrack[] {
 }
 
 /**
- * ROBUST: Try to extract JSON objects from script tags by parsing valid JSON chunks
+ * Extracts JSON or track objects from Next.js push arguments.
+ * Handles escaped/unescaped quotes, Next.js RSC chunk prefixes, and object fragments.
  */
-function extractJsonFromScripts(html: string): Record<string, unknown>[] {
+function extractFromPushArg(argStr: string): Record<string, unknown>[] {
   const results: Record<string, unknown>[] = [];
-  
-  // Find all script tags
-  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
-  let match;
-  
-  while ((match = scriptRegex.exec(html)) !== null) {
-    const scriptContent = match[1];
-    if (!scriptContent) continue;
-    
-    // Remove common non-JSON wrappers like self.__next_f.push([...])
-    const cleaned = scriptContent
-      .replace(/^self\.__next_f\.push\(\[/, '')
-      .replace(/\]\);?$/, '')
-      .trim();
-    
-    // Try to parse as JSON
-    try {
-      const json = JSON.parse(cleaned);
-      if (typeof json === "object" && json !== null) {
-        results.push(json as Record<string, unknown>);
-      }
-    } catch {
-      // Try to find JSON-like objects within the script
-      const jsonMatches = cleaned.matchAll(/\{[^{}]*?"(?:title|name|artists|tracks)"\s*:\s*[^{}]*\}/g);
-      for (const jsonMatch of jsonMatches) {
+  let inner = argStr.trim();
+  const tupleMatch = /^\[\s*\d+\s*,\s*([\s\S]*)\s*\]$/.exec(inner);
+  if (tupleMatch) {
+    inner = tupleMatch[1].trim();
+  }
+
+  // 1. Try parsing inner directly as JSON
+  try {
+    const val = JSON.parse(inner);
+    if (typeof val === "string") {
+      try {
+        const parsedObj = JSON.parse(val);
+        if (typeof parsedObj === "object" && parsedObj !== null) results.push(parsedObj as Record<string, unknown>);
+      } catch {
         try {
-          const partialJson = JSON.parse(jsonMatch[0]);
-          if (typeof partialJson === "object" && partialJson !== null) {
-            results.push(partialJson as Record<string, unknown>);
-          }
+          const wrapped = JSON.parse("{" + val + "}");
+          if (typeof wrapped === "object" && wrapped !== null) results.push(wrapped as Record<string, unknown>);
         } catch {
-          // ignore
+          const colonIdx = val.indexOf(":");
+          if (colonIdx > 0 && colonIdx < 10) {
+            const stripped = val.slice(colonIdx + 1);
+            try {
+              const obj = JSON.parse(stripped);
+              if (typeof obj === "object" && obj !== null) results.push(obj as Record<string, unknown>);
+            } catch {
+              try {
+                const wrapped = JSON.parse("{" + stripped + "}");
+                if (typeof wrapped === "object" && wrapped !== null) results.push(wrapped as Record<string, unknown>);
+              } catch {}
+            }
+          }
+        }
+      }
+    } else if (typeof val === "object" && val !== null) {
+      results.push(val as Record<string, unknown>);
+    }
+  } catch {
+    // 2. Unescaped quotes inside template literal string
+    let raw = inner;
+    if (raw.startsWith('"') && raw.endsWith('"')) {
+      raw = raw.slice(1, -1);
+    }
+    try {
+      const obj = JSON.parse(raw);
+      if (typeof obj === "object" && obj !== null) results.push(obj as Record<string, unknown>);
+    } catch {
+      try {
+        const wrapped = JSON.parse("{" + raw + "}");
+        if (typeof wrapped === "object" && wrapped !== null) results.push(wrapped as Record<string, unknown>);
+      } catch {
+        const unescaped = raw.replace(/\\"/g, '"');
+        try {
+          const obj = JSON.parse(unescaped);
+          if (typeof obj === "object" && obj !== null) results.push(obj as Record<string, unknown>);
+        } catch {
+          try {
+            const wrapped = JSON.parse("{" + unescaped + "}");
+            if (typeof wrapped === "object" && wrapped !== null) results.push(wrapped as Record<string, unknown>);
+          } catch {}
         }
       }
     }
   }
-  
+  return results;
+}
+
+/**
+ * ROBUST: Try to extract JSON objects from script tags by parsing Next.js pushes and valid JSON chunks
+ */
+function extractJsonFromScripts(html: string): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+
+  // 1. Next.js streaming pushes: self.__next_f.push(...)
+  const pushRegex = /(?:self\.__next_f|\(self\.__next_f=self\.__next_f\|\|\[\]\))\s*\.push\s*\(/g;
+  let match;
+  while ((match = pushRegex.exec(html)) !== null) {
+    const start = match.index + match[0].length;
+    let depth = 1;
+    let inString = false;
+    let stringChar = "";
+    let isEscaped = false;
+    let end = start;
+
+    for (let i = start; i < html.length; i++) {
+      const char = html[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (inString) {
+        if (char === stringChar) inString = false;
+      } else {
+        if (char === '"' || char === "'") {
+          inString = true;
+          stringChar = char;
+        } else if (char === "(") {
+          depth++;
+        } else if (char === ")") {
+          depth--;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (depth === 0) {
+      const argStr = html.slice(start, end);
+      results.push(...extractFromPushArg(argStr));
+    }
+  }
+
+  // 2. Regular script tags (JSON-LD, full objects, balanced braces)
+  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const scriptContent = match[1]?.trim();
+    if (!scriptContent) continue;
+
+    try {
+      const json = JSON.parse(scriptContent);
+      if (typeof json === "object" && json !== null) {
+        results.push(json as Record<string, unknown>);
+        continue;
+      }
+    } catch {}
+
+    // Find balanced JSON objects in script
+    let depth = 0;
+    let start = -1;
+    let inString = false;
+    let isEscaped = false;
+    for (let i = 0; i < scriptContent.length; i++) {
+      const char = scriptContent[i];
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        isEscaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === "{") {
+          if (depth === 0) start = i;
+          depth++;
+        } else if (char === "}") {
+          depth--;
+          if (depth === 0 && start !== -1) {
+            try {
+              const chunk = scriptContent.slice(start, i + 1);
+              const obj = JSON.parse(chunk);
+              if (typeof obj === "object" && obj !== null) {
+                results.push(obj as Record<string, unknown>);
+              }
+            } catch {}
+            start = -1;
+          }
+        }
+      }
+    }
+  }
+
   return results;
 }
 
@@ -355,10 +494,16 @@ function extractJsonFromScripts(html: string): Record<string, unknown>[] {
  * ROBUST: Extract tracks from any object structure recursively
  */
 function extractTracksFromAny(obj: unknown, maxDepth: number = 10): YandexTrack[] {
-  if (maxDepth === 0) return [];
-  
+  if (maxDepth === 0 || obj === null || obj === undefined) return [];
+
   const tracks: YandexTrack[] = [];
-  
+
+  const parsedSelf = parseRawTrack(obj);
+  if (parsedSelf && parsedSelf.artists.length > 0 && parsedSelf.artists[0] !== "Unknown Artist") {
+    tracks.push(parsedSelf);
+    return tracks;
+  }
+
   if (Array.isArray(obj)) {
     for (const item of obj) {
       const parsed = parseRawTrack(item);
@@ -368,27 +513,27 @@ function extractTracksFromAny(obj: unknown, maxDepth: number = 10): YandexTrack[
         tracks.push(...extractTracksFromAny(item, maxDepth - 1));
       }
     }
-  } else if (typeof obj === "object" && obj !== null) {
+  } else if (typeof obj === "object") {
     const record = obj as Record<string, unknown>;
-    
+
     // Check for explicit tracks array
     if (Array.isArray(record.tracks)) {
-      tracks.push(...extractTracksFromAny(record.tracks, maxDepth));
+      tracks.push(...extractTracksFromAny(record.tracks, maxDepth - 1));
     }
-    
-    // Check for playlist object
-    if (Array.isArray(record.playlist)) {
-      tracks.push(...extractTracksFromAny(record.playlist, maxDepth));
+
+    // Check for playlist object or array
+    if (typeof record.playlist === "object" && record.playlist !== null) {
+      tracks.push(...extractTracksFromAny(record.playlist, maxDepth - 1));
     }
-    
-    // Recursively search nested objects
-    for (const value of Object.values(record)) {
-      if (typeof value === "object" && value !== null) {
+
+    // Recursively search other nested objects
+    for (const [key, value] of Object.entries(record)) {
+      if (key !== "tracks" && key !== "playlist" && typeof value === "object" && value !== null) {
         tracks.push(...extractTracksFromAny(value, maxDepth - 1));
       }
     }
   }
-  
+
   return tracks;
 }
 
@@ -547,6 +692,7 @@ export async function fetchYandexPlaylist(
 
   // Step 2: If we have owner and kind, try public web and mobile API endpoints
   if (currentOwner && currentKind) {
+    let handlersSucceeded = false;
     // Attempt A: Web handlers endpoint
     try {
       const handlersUrl = `https://music.yandex.ru/handlers/playlist.jsx?owner=${encodeURIComponent(currentOwner)}&kinds=${encodeURIComponent(currentKind)}&light=true`;
@@ -563,6 +709,7 @@ export async function fetchYandexPlaylist(
 
       const text = await response.text();
       if (text.startsWith("{")) {
+        handlersSucceeded = true;
         const data = JSON.parse(text) as {
           playlist?: {
             title?: string;
@@ -603,64 +750,66 @@ export async function fetchYandexPlaylist(
       // Fall through to page inspection
     }
 
-    // Attempt B: api.music.yandex.net endpoint
-    try {
-      const apiUrl = `https://api.music.yandex.net/users/${encodeURIComponent(currentOwner)}/playlists/${currentKind}`;
-      const response = await fetchWithBackoff(
-        apiUrl,
-        {
-          headers: {
-            "Accept": "application/json",
-            "X-Yandex-Music-Client": "YandexMusicAndroid/24023251",
-          },
-        },
-        { timeoutMs, retries, fetcher, deadline }
-      );
-
-      const text = await response.text();
-      if (text.startsWith("{")) {
-        const data = JSON.parse(text) as {
-          result?: {
-            title?: string;
-            trackCount?: number;
-            tracks?: unknown[];
-            visibility?: string;
-          };
-          error?: { name?: string; message?: string };
-        };
-
-        if (data.error?.name === "not-found") {
-          throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
-        }
-        if (data.result?.visibility === "private") {
-          throw new YandexPlaylistError("private", "Плейлист приватный или доступ ограничен. Сделайте его публичным в настройках.");
-        }
-
-        if (Array.isArray(data.result?.tracks) && data.result.tracks.length > 0) {
-          const parsedTracks: YandexTrack[] = [];
-          for (const item of data.result.tracks) {
-            const parsed = parseRawTrack(item);
-            if (parsed) parsedTracks.push(parsed);
-          }
-          const deduplicated = deduplicateTracks(parsedTracks);
-          return cacheAndReturn(
-            normalized.canonicalUrl,
-            {
-              id: `${currentOwner}:${currentKind}`,
-              title: data.result.title ?? `Плейлист ${currentOwner}`,
-              owner: currentOwner,
-              trackCount: deduplicated.length,
-              tracks: deduplicated,
+    // Attempt B: api.music.yandex.net endpoint (only if Attempt A failed to respond with JSON)
+    if (!handlersSucceeded) {
+      try {
+        const apiUrl = `https://api.music.yandex.net/users/${encodeURIComponent(currentOwner)}/playlists/${currentKind}`;
+        const response = await fetchWithBackoff(
+          apiUrl,
+          {
+            headers: {
+              "Accept": "application/json",
+              "X-Yandex-Music-Client": "YandexMusicAndroid/24023251",
             },
-            options.skipCache
-          );
+          },
+          { timeoutMs, retries, fetcher, deadline }
+        );
+
+        const text = await response.text();
+        if (text.startsWith("{")) {
+          const data = JSON.parse(text) as {
+            result?: {
+              title?: string;
+              trackCount?: number;
+              tracks?: unknown[];
+              visibility?: string;
+            };
+            error?: { name?: string; message?: string };
+          };
+
+          if (data.error?.name === "not-found") {
+            throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
+          }
+          if (data.result?.visibility === "private") {
+            throw new YandexPlaylistError("private", "Плейлист приватный или доступ ограничен. Сделайте его публичным в настройках.");
+          }
+
+          if (Array.isArray(data.result?.tracks) && data.result.tracks.length > 0) {
+            const parsedTracks: YandexTrack[] = [];
+            for (const item of data.result.tracks) {
+              const parsed = parseRawTrack(item);
+              if (parsed) parsedTracks.push(parsed);
+            }
+            const deduplicated = deduplicateTracks(parsedTracks);
+            return cacheAndReturn(
+              normalized.canonicalUrl,
+              {
+                id: `${currentOwner}:${currentKind}`,
+                title: data.result.title ?? `Плейлист ${currentOwner}`,
+                owner: currentOwner,
+                trackCount: deduplicated.length,
+                tracks: deduplicated,
+              },
+              options.skipCache
+            );
+          }
         }
+      } catch (e) {
+        if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found" || e.code === "geo_blocked")) {
+          throw e;
+        }
+        // Fall through to page inspection
       }
-    } catch (e) {
-      if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found" || e.code === "geo_blocked")) {
-        throw e;
-      }
-      // Fall through to page inspection
     }
   }
 
