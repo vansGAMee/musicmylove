@@ -57,7 +57,7 @@ class TasteLift(nn.Module):
         self.tracks = tracks
         self.track_index = {track["id"]: i for i, track in enumerate(tracks)}
         self._features = [self.metadata_features(track) for track in tracks]
-        self.register_buffer("popularity", torch.tensor([track.get("popularity", {}).get("percentile", 0.0) for track in tracks]), persistent=False)
+        self.register_buffer("popularity", torch.tensor([track.get("popularity", {}).get("percentile", 0.5) for track in tracks]), persistent=False)
         self.training_summary = {}
 
     @classmethod
@@ -150,9 +150,17 @@ class TasteLift(nn.Module):
 
     def loss(self, seeds, mask, positive, negative, diversity_weight=0.02):
         heads = self.encode_set(seeds, mask)
-        candidates = torch.stack([positive, negative], dim=1)
-        scores = self.score_embeddings(heads, self.encode_tracks(candidates), self.popularity[candidates])["lift"]
-        return bpr_loss(scores[:, 0], scores[:, 1]) + diversity_weight * self.diversity_loss(heads)
+        if negative.ndim == 1:
+            candidates = torch.stack([positive, negative], dim=1)
+            scores = self.score_embeddings(heads, self.encode_tracks(candidates), self.popularity[candidates])["lift"]
+            bpr = bpr_loss(scores[:, 0], scores[:, 1])
+        else:
+            candidates = torch.cat([positive.unsqueeze(1), negative], dim=1)
+            scores = self.score_embeddings(heads, self.encode_tracks(candidates), self.popularity[candidates])["lift"]
+            pos_scores = scores[:, :1]
+            neg_scores = scores[:, 1:]
+            bpr = F.softplus(neg_scores - pos_scores).mean()
+        return bpr + diversity_weight * self.diversity_loss(heads)
 
     def export_json(self, path):
         payload = {
@@ -195,6 +203,29 @@ def _batch(model, rows, device):
     positive = torch.tensor([model.track_index[row["positive_id"]] for row in rows], device=device)
     negative = torch.tensor([model.track_index[row["negative_id"]] for row in rows], device=device)
     return seeds, mask, positive, negative
+
+
+def _sample_candidates_32(model, batch, tracks_by_band, seed, epoch, offset, device):
+    candidates = torch.zeros((len(batch), 32), dtype=torch.long, device=device)
+    for i, row in enumerate(batch):
+        band = row.get("positive_band")
+        if band is None:
+            band = int(model.popularity[model.track_index[row["positive_id"]]].item() * 10)
+        band = min(9, max(0, int(band)))
+        history_ids = set(row.get("user_history_ids", [])) | set(row.get("seed_ids", [])) | {row.get("positive_id")}
+        history_indices = {model.track_index[tid] for tid in history_ids if tid in model.track_index}
+        pool = [idx for idx in tracks_by_band.get(band, []) if idx not in history_indices]
+        if not pool:
+            pool = [idx for idx in range(len(model.tracks)) if idx not in history_indices]
+        if not pool:
+            pool = [model.track_index.get(row.get("negative_id", row["positive_id"]), 0)]
+        rng = random.Random(f"{seed}:{epoch}:{offset}:{i}")
+        if len(pool) >= 32:
+            sampled = rng.sample(pool, 32)
+        else:
+            sampled = [pool[rng.randrange(len(pool))] for _ in range(32)]
+        candidates[i] = torch.tensor(sampled, dtype=torch.long, device=device)
+    return candidates
 
 
 def _save_checkpoint(path, payload):
@@ -262,6 +293,14 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
         if device.startswith("cuda"):
             torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])
         start, history, best = checkpoint["epoch"], checkpoint["history"], checkpoint["best"]
+    tracks_by_band: dict[int, list[int]] = {}
+    for i, track in enumerate(model.tracks):
+        band = track.get("popularity", {}).get("band")
+        if band is None:
+            pct = track.get("popularity", {}).get("percentile", 0.5)
+            band = min(9, max(0, int(pct * 10)))
+        tracks_by_band.setdefault(int(band), []).append(i)
+
     print(json.dumps({"event": "start", "device": device, "initialization": "resume" if resume else "scratch",
           "start_epoch": start, "train_pairs": len(rows), "validation_pairs": len(validation),
           "config": config, "execution": execution}), flush=True)
@@ -273,7 +312,19 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
         for offset in range(0, len(order), batch_size):
             batch = [rows[index] for index in order[offset:offset + batch_size]]
             optimizer.zero_grad(set_to_none=True)
-            loss = model.loss(*_batch(model, batch, device))
+            seeds, mask, positive, _ = _batch(model, batch, device)
+            candidates_32 = _sample_candidates_32(model, batch, tracks_by_band, seed, epoch, offset, device)
+            was_training = model.training
+            model.eval()
+            with torch.no_grad():
+                heads = model.encode_set(seeds, mask)
+                cand_vecs = model.encode_tracks(candidates_32)
+                scores_32 = model.score_embeddings(heads, cand_vecs, model.popularity[candidates_32])["lift"]
+                k_hard = min(4, scores_32.shape[1])
+                top_hard_indices = torch.topk(scores_32, k=k_hard, dim=-1).indices
+                hardest_negatives = candidates_32.gather(1, top_hard_indices)
+            model.train(was_training)
+            loss = model.loss(seeds, mask, positive, hardest_negatives)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()

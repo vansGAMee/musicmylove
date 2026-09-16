@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import MusicRecommender from "../../src/components/MusicRecommender";
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
 
 test("prefetches each selection and automatically returns results after the fifth", async () => {
   vi.useFakeTimers();
@@ -222,5 +222,116 @@ test("handles Yandex geo-block error gracefully without ever rendering an iframe
   expect(container.querySelector("iframe")).toBeNull();
   expect(container.querySelector(".yandex-iframe-wrapper")).toBeNull();
 });
+
+test("displays liked tracks in favorites tab and keeps them in the recommendation list", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: [
+          { mbid: "rec-1", title: "Loved Song", artist: "Loved Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+          { mbid: "rec-2", title: "Other Song", artist: "Other Artist", score: 95, strongestTasteHead: 1, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.2, spotifyLink: "" },
+        ],
+        seeds: Array.from({ length: 5 }, (_, i) => ({
+          input: { artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  const { container } = render(<MusicRecommender />);
+  const playlistInput = [
+    "Artist,Title",
+    "Seed Artist 0,Seed Title 0",
+    "Seed Artist 1,Seed Title 1",
+    "Seed Artist 2,Seed Title 2",
+    "Seed Artist 3,Seed Title 3",
+    "Seed Artist 4,Seed Title 4",
+  ].join("\n");
+
+  const file = new File([playlistInput], "seeds.csv", { type: "text/csv" });
+  file.text = async () => playlistInput;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  // Recommendations are displayed
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+
+  // Find the like button for Loved Song and click it
+  const likeBtn = screen.getByRole("button", { name: /^like track: loved song$/i });
+  await act(async () => {
+    fireEvent.click(likeBtn);
+  });
+
+  // The track is still in the playlist (not removed!)
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+
+  // Switch to Favorites tab
+  const favoritesTabBtn = screen.getAllByRole("button", { name: /Favorites|Избранное/i })[0];
+  await act(async () => {
+    fireEvent.click(favoritesTabBtn);
+  });
+
+  // Favorites tab displays Loved Song!
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+  // But does NOT display Other Song (which was not liked)
+  expect(screen.queryByText("Other Song")).toBeNull();
+});
+
+test("excludes tracks from the entire playlist even when playlist has more than 500 tracks", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("/api/tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: [
+          // This track is in the playlist at position 550 (outside the first 500)
+          { mbid: "rec-in-playlist", title: "Existing Song 550", artist: "Existing Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+          // This track is genuinely new
+          { mbid: "rec-brand-new", title: "Brand New Track", artist: "New Artist", score: 95, strongestTasteHead: 1, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.2, spotifyLink: "" },
+        ],
+        seeds: Array.from({ length: 500 }, (_, i) => ({
+          input: { artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+
+  const { container } = render(<MusicRecommender />);
+  // Create 600 tracks with CSV header
+  const tracks600 = [
+    "Artist,Title",
+    ...Array.from({ length: 600 }, (_, i) =>
+      i === 550 ? "Existing Artist,Existing Song 550" : `Playlist Artist ${i},Playlist Song ${i}`
+    ),
+  ].join("\n");
+
+  const file = new File([tracks600], "large_playlist.csv", { type: "text/csv" });
+  file.text = async () => tracks600;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  // Recommendations should contain Brand New Track, but NOT Existing Song 550
+  const recs = screen.getAllByTestId("recommendation");
+  const recTitles = recs.map((el) => el.querySelector(".track-title")?.textContent);
+  expect(recTitles).toContain("Brand New Track");
+  expect(recTitles).not.toContain("Existing Song 550");
+});
+
 
 

@@ -28,9 +28,9 @@ function duplicateKey(track: RankedTrack): string {
 }
 
 function compareRanked(left: RankedTrack, right: RankedTrack): number {
-  return finite(right.score) - finite(left.score)
+  return finite(right.liftScore) - finite(left.liftScore)
+    || finite(right.score) - finite(left.score)
     || finite(right.residualScore, right.score) - finite(left.residualScore, left.score)
-    || finite(right.liftScore) - finite(left.liftScore)
     || left.mbid.localeCompare(right.mbid)
     || normalizeIdentityText(left.artist).localeCompare(normalizeIdentityText(right.artist))
     || normalizeIdentityText(left.title).localeCompare(normalizeIdentityText(right.title))
@@ -39,6 +39,10 @@ function compareRanked(left: RankedTrack, right: RankedTrack): number {
 
 function isMainstream(track: RankedTrack): boolean {
   return (track.popularityPercentile ?? 0.5) >= MAINSTREAM_PERCENTILE;
+}
+
+function isLongTail(track: RankedTrack): boolean {
+  return (track.popularityPercentile ?? 0.5) < LONG_TAIL_SHARE;
 }
 
 function isExceptional(track: RankedTrack, maxScore: number, minScore: number, maxLift: number, minLift: number): boolean {
@@ -164,13 +168,13 @@ export function buildTasteSlate(ranked: readonly RankedTrack[], limit = 40): Ran
   }
 
   // Phase 3: Check long-tail target (35% = 14 of 40)
-  const requiredLongTail = Math.min(Math.ceil(target * LONG_TAIL_SHARE), candidates.filter((t) => !isMainstream(t)).length);
-  let longTailCount = selected.filter((t) => !isMainstream(t)).length;
+  const requiredLongTail = Math.min(Math.ceil(target * LONG_TAIL_SHARE), candidates.filter((t) => isLongTail(t)).length);
+  let longTailCount = selected.filter((t) => isLongTail(t)).length;
 
   if (longTailCount < requiredLongTail) {
     for (const track of candidates) {
       if (selected.length >= target || longTailCount >= requiredLongTail) break;
-      if (!isMainstream(track) && canAdd(track)) {
+      if (isLongTail(track) && canAdd(track)) {
         add(track);
         longTailCount++;
       }

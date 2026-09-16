@@ -191,7 +191,7 @@ export class TasteLiftModel {
       heads,
       candidates: candidates.map((candidate) => {
         const vector = this.encodeTrack(candidate);
-        const popularityPercentile = candidate.popularityPercentile ?? (candidate.mbid ? popularity[candidate.mbid] : undefined) ?? 0;
+        const popularityPercentile = candidate.popularityPercentile ?? (candidate.mbid ? popularity[candidate.mbid] : undefined) ?? 0.5;
         return this.scoreEncodedCandidate(heads, vector, popularityPercentile);
       }),
     };

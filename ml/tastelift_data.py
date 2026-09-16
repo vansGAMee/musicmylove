@@ -19,7 +19,7 @@ from typing import Any
 
 
 DATASET_VERSION = 2
-DEFAULT_MASKS_PER_USER = 12
+DEFAULT_MASKS_PER_USER = 32
 MIN_SEEDS = 5
 MAX_SEEDS = 30
 STRONG_LISTEN_COUNT = 2
@@ -160,8 +160,12 @@ def build_popularity(user_track_ids: dict[str, set[str]], bands: int = POPULARIT
     return output
 
 
+NEUTRAL_POPULARITY_PERCENTILE = 0.5
+NEUTRAL_POPULARITY_BAND = POPULARITY_BANDS // 2
+
+
 def _popularity_for(track_id: str, popularity: dict[str, dict[str, float | int]]) -> dict[str, float | int]:
-    return popularity.get(track_id, {"user_frequency": 0, "percentile": 0.0, "band": 0})
+    return popularity.get(track_id, {"user_frequency": 0, "percentile": NEUTRAL_POPULARITY_PERCENTILE, "band": NEUTRAL_POPULARITY_BAND})
 
 
 def _episode_rng(seed: int, user_key: str, mask_index: int) -> random.Random:
@@ -235,6 +239,7 @@ def _episodes_for_user(
             "negative_id": negative_id,
             "negative_band": negative_band,
             "negative_source": negative_source,
+            "user_history_ids": sorted(known_ids),
         })
     return output
 

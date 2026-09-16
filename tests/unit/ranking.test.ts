@@ -74,7 +74,7 @@ describe("ranking", () => {
       expect(item.seedSupportEvidence?.length).toBeGreaterThanOrEqual(item.seedSupport!);
       expect(item.popularityPercentile).toBeGreaterThanOrEqual(0);
       expect(item.liftScore).toBeTypeOf("number");
-      expect(item.score).toBeCloseTo(item.residualScore! + item.liftScore! + item.seedSupport! / seeds.length);
+      expect(item.score).toBeCloseTo(item.liftScore!);
     }
   });
 

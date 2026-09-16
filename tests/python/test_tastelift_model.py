@@ -164,3 +164,58 @@ def test_require_kitty_rejects_absence_and_records_injected_provenance(tmp_path,
     starts = [json.loads(line) for line in capsys.readouterr().out.splitlines()
               if json.loads(line).get("event") == "start"]
     assert starts[-1]["execution"] == expected
+
+
+def test_known_track_without_popularity_metadata_does_not_default_to_zero_popularity():
+    data = dataset()
+    data["tracks"].append({"id": "track-no-pop", "artist": "Mystery Artist", "title": "Mystery Track"})
+    net = api().TasteLift.from_dataset(data, dim=24, buckets=128, seed=41).eval()
+    idx = net.track_index["track-no-pop"]
+    assert net.popularity[idx].item() == pytest.approx(0.5)
+    assert net.popularity[idx].item() != 0.0
+
+
+def test_dynamic_hard_negatives_never_sample_user_history_and_train_top_4_hardest():
+    lib = api()
+    data = dataset(track_count=100)
+    net = lib.TasteLift.from_dataset(data, dim=24, buckets=128, seed=41)
+    
+    # Positive track is "10" (band 1), user history contains tracks 0..9 and 10..15
+    user_history = [str(i) for i in range(16)]
+    batch = [{
+        "seed_ids": [str(i) for i in range(5)],
+        "positive_id": "10",
+        "positive_band": 1,
+        "negative_id": "99",
+        "negative_band": 1,
+        "user_history_ids": user_history,
+    }]
+    
+    tracks_by_band = {}
+    for i, track in enumerate(net.tracks):
+        pct = track.get("popularity", {}).get("percentile", 0.5)
+        band = min(9, max(0, int(pct * 10)))
+        tracks_by_band.setdefault(band, []).append(i)
+        
+    sampled_32 = lib._sample_candidates_32(net, batch, tracks_by_band, seed=41, epoch=0, offset=0, device="cpu")
+    assert sampled_32.shape == (1, 32)
+    
+    # Crucial check: none of the 32 samples are in user history!
+    history_indices = {net.track_index[tid] for tid in user_history}
+    assert not any(idx.item() in history_indices for idx in sampled_32[0])
+    
+    # Verify training with 4 hardest negatives
+    seeds, mask, positive, _ = lib._batch(net, batch, "cpu")
+    heads = net.encode_set(seeds, mask)
+    cand_vecs = net.encode_tracks(sampled_32)
+    scores = net.score_embeddings(heads, cand_vecs, net.popularity[sampled_32])["lift"]
+    top4 = torch.topk(scores, k=4, dim=-1).indices
+    hardest = sampled_32.gather(1, top4)
+    assert hardest.shape == (1, 4)
+    
+    loss = net.loss(seeds, mask, positive, hardest)
+    assert loss.ndim == 0
+    loss.backward()
+    assert net.track_projection.weight.grad is not None
+
+

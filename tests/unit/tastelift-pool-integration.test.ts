@@ -33,7 +33,7 @@ describe("TasteCandidatePool ranking", () => {
     expect(ranked!.seedSupport).toBe(2);
     expect(ranked!.seedSupportEvidence).toHaveLength(3);
     expect(ranked!.seedSupportEvidence?.map((item) => item.recordingMbid)).toContain("candidate-a-alt");
-    expect(ranked!.score).toBeCloseTo(ranked!.residualScore! + ranked!.liftScore! + ranked!.seedSupport! / 5);
+    expect(ranked!.score).toBeCloseTo(ranked!.liftScore!);
   });
 
   test("does not feed neural catalog evidence into residual features trained on external ranks", () => {

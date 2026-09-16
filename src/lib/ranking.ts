@@ -156,28 +156,11 @@ function rankEvidenceCandidates(
   }
   if (tasteLift) {
     const fields = buildTasteLiftRankingFields(tasteLift, tasteSeeds, candidates);
-    ranked.forEach((item, index) => {
+    ranked.forEach((item) => {
       const taste = fields.get(item.mbid)!;
-      const candidate = candidates[index]!;
       item.residualScore = item.score;
       Object.assign(item, taste);
-
-      const hasMultiChannel = candidate.evidence.some((e) => e.source === "listenbrainz-history" || e.source === "tastelift-catalog") || candidate.popularityPercentile !== undefined;
-      if (hasMultiChannel) {
-        const coScore = candidate.evidence
-          .filter((e) => e.source === "listenbrainz-history")
-          .reduce((sum, e) => sum + (e.rawScore ?? 0), 0);
-        const extScore = candidate.evidence
-          .filter((e) => e.source === "listenbrainz" || e.source === undefined)
-          .reduce((sum, e) => sum + (e.reciprocalRank ?? (1 / (RRF_K + (e.rank ?? 60)))), 0);
-        const support = candidate.seedSupport ?? taste.seedSupport;
-        const pop = candidate.popularityPercentile ?? taste.popularityPercentile ?? 0;
-        const residual = coScore * 2.0 + extScore * 40 + support * 1.5 + pop * 1.5;
-        item.residualScore = residual;
-        item.score = residual + taste.liftScore * 0.2;
-      } else {
-        item.score += tasteLiftContribution(taste, tasteSeeds.length);
-      }
+      item.score = taste.liftScore;
     });
   }
   return ranked.sort((a, b) => b.score - a.score || a.mbid.localeCompare(b.mbid));

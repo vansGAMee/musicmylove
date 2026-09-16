@@ -46,4 +46,12 @@ describe("TasteLiftModel", () => {
     expect(score.candidates).toEqual([]);
     expect(model.scoreCandidates([...fiveHundred].reverse(), [])).toEqual(score);
   });
+
+  test("known track without popularity metadata receives neutral 50% popularity rather than 0%", () => {
+    const model = TasteLiftModel.fromArtifact(artifact);
+    const candidateWithoutPop = [{ mbid: "mystery-track-no-pop", artist: "Mystery", title: "Song" }];
+    const score = model.scoreCandidates(seeds, candidateWithoutPop);
+    expect(score.candidates[0]!.popularityPercentile).toBe(0.5);
+    expect(score.candidates[0]!.popularityPercentile).not.toBe(0);
+  });
 });

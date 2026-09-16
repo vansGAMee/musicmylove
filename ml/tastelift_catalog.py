@@ -37,7 +37,7 @@ def collect_train_tracks(root: Path, manifest_path: Path, popularity: dict[str, 
                 "artist": artist,
                 "title": title,
                 **({"release": str(row["release_name"]).strip()} if row.get("release_name") else {}),
-                "popularityPercentile": float(popularity.get(mbid, 0.0)),
+                "popularityPercentile": float(popularity.get(mbid, 0.5)),
             }
             previous = tracks.get(mbid)
             if previous is None or json.dumps(candidate, ensure_ascii=False, sort_keys=True) < json.dumps(previous, ensure_ascii=False, sort_keys=True):

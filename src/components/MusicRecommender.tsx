@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RankedTrack, SeedTrack, Track } from "../lib/types";
 import { downloadTasteCardPng } from "../lib/exportCard";
 import { parseFileContentToSongs } from "../lib/tastelift/input";
+import { recordingIdentity } from "../lib/tastelift/identity";
 
 const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT", "M3U"] as const;
 
@@ -229,6 +230,8 @@ export default function MusicRecommender() {
   const [searchResults, setSearchResults] = useState<Track[]>([]);
   const [seeds, setSeeds] = useState<SeedTrack[]>([]);
   const [importedSeeds, setImportedSeeds] = useState<{ artist: string; title: string }[]>([]);
+  const [allPlaylistTracks, setAllPlaylistTracks] = useState<{ artist: string; title: string }[]>([]);
+  const feedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [rankedPool, setRankedPool] = useState<RankedTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -421,17 +424,18 @@ export default function MusicRecommender() {
     };
   }, [query, seeds.length]);
 
-  const requestRecommendations = async (payloadBody: unknown) => {
+  const requestRecommendations = async (payloadBody: unknown, feedbackOverride?: Record<string, "like" | "dislike">) => {
     setLoading(true);
     setError("");
     try {
       // Automatically incorporate user favorites ("like") into taste seed songs
       let bodyToSend = payloadBody;
-      const likedMbids = Object.keys(feedback).filter((id) => feedback[id] === "like");
+      const currentFeedback = feedbackOverride ?? feedback;
+      const likedMbids = Object.keys(currentFeedback).filter((id) => currentFeedback[id] === "like");
       if (typeof payloadBody === "object" && payloadBody !== null) {
         const bodyObj = payloadBody as { songs?: Array<{ artist: string; title: string; spotify_url?: string }> };
         if (Array.isArray(bodyObj.songs)) {
-          const baseSongs = bodyObj.songs.slice(0, 500);
+          const baseSongs = bodyObj.songs.slice(-500);
           const existingKeys = new Set(
             baseSongs.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`)
           );
@@ -448,7 +452,7 @@ export default function MusicRecommender() {
           }
           bodyToSend = {
             ...bodyObj,
-            songs: [...baseSongs, ...extraLikedSongs].slice(0, 500),
+            songs: [...extraLikedSongs, ...baseSongs].slice(0, 500),
           };
         }
       }
@@ -573,9 +577,10 @@ export default function MusicRecommender() {
       }));
       setSeeds(seedTracks);
       setImportedSeeds(parsedItems);
+      setAllPlaylistTracks(parsedItems);
 
       if (parsedItems.length >= 5) {
-        void requestRecommendations({ songs: parsedItems.slice(0, 500) });
+        void requestRecommendations({ songs: parsedItems.slice(-500) });
       }
     } catch {
       // ignore
@@ -588,12 +593,13 @@ export default function MusicRecommender() {
     setSeeds(next);
     setQuery("");
     setSearchResults([]);
+    setAllPlaylistTracks((prev) => [...prev, { artist: track.artist, title: track.title }]);
     if (next.length === 5 || (importedSeeds.length > 0 && next.length > seeds.length)) {
       const allSongs = [
         ...next.map((seed) => ({ artist: seed.artist, title: seed.title })),
         ...importedSeeds,
       ];
-      await requestRecommendations({ songs: allSongs.slice(0, 500) });
+      await requestRecommendations({ songs: allSongs.slice(-500) });
     }
   };
 
@@ -604,13 +610,13 @@ export default function MusicRecommender() {
   const handleUploadedContent = async (text: string) => {
     setError("");
     try {
-      const parsedSongs = parseFileContentToSongs(text, { allowPartial: true });
+      const parsedSongs = parseFileContentToSongs(text, { allowPartial: true, unlimited: true });
       if (parsedSongs.length === 0) {
         setError(t.errorCouldNotParse);
         return;
       }
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 500).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(-500).map((s, idx) => ({
         mbid: `seed-upload-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -620,10 +626,11 @@ export default function MusicRecommender() {
       }));
       setSeeds(uploadSeeds);
       setImportedSeeds(parsedSongs.map((s) => ({ artist: s.artist, title: s.title })));
+      setAllPlaylistTracks(parsedSongs.map((s) => ({ artist: s.artist, title: s.title })));
 
       if (parsedSongs.length >= 5) {
         await requestRecommendations({
-          songs: parsedSongs.slice(0, 500).map((s) => ({
+          songs: parsedSongs.slice(-500).map((s) => ({
             artist: s.artist,
             title: s.title,
             ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
@@ -793,8 +800,9 @@ export default function MusicRecommender() {
       }));
 
       setImportedSeeds(parsedSongs);
+      setAllPlaylistTracks(parsedSongs);
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 500).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(-500).map((s, idx) => ({
         mbid: `seed-ym-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -806,7 +814,7 @@ export default function MusicRecommender() {
       setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
 
       await requestRecommendations({
-        songs: parsedSongs.slice(0, 500).map((s) => ({
+        songs: parsedSongs.slice(-500).map((s) => ({
           artist: s.artist,
           title: s.title,
         })),
@@ -838,82 +846,85 @@ export default function MusicRecommender() {
       // ignore
     }
 
-    // Auto-incorporate favorites into taste seeds:
-    if (value === "like" && !isCurrentlyLiked) {
-      const candidate = rankedPool.find((t) => t.mbid === mbid) ?? INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
-      if (candidate) {
-        setSeeds((prev) => {
-          if (
-            prev.some(
-              (s) =>
-                s.mbid === candidate.mbid ||
-                (s.title.toLowerCase() === candidate.title.toLowerCase() &&
-                  s.artist.toLowerCase() === candidate.artist.toLowerCase())
-            )
-          ) {
-            return prev;
-          }
-          return [
-            ...prev,
-            {
-              mbid: candidate.mbid,
-              title: candidate.title,
-              artist: candidate.artist,
-              score: 100,
-              features: [],
-              pickedFrom: [],
-            },
-          ];
-        });
-        setImportedSeeds((prev) => {
-          if (
-            prev.some(
-              (s) =>
-                s.title.toLowerCase() === candidate.title.toLowerCase() &&
-                s.artist.toLowerCase() === candidate.artist.toLowerCase()
-            )
-          ) {
-            return prev;
-          }
-          return [...prev, { artist: candidate.artist, title: candidate.title }];
-        });
+    // Dynamic influence on neural network: when user likes or un-likes a track,
+    // refresh recommendations with the updated favorites incorporated into the taste seeds!
+    if (rankedPool.length > 0 && (allPlaylistTracks.length >= 5 || importedSeeds.length >= 5 || seeds.length >= 5)) {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
       }
-    } else if (value === "like" && isCurrentlyLiked) {
-      // User un-liked the track: remove from seeds if it was added
-      setSeeds((prev) => prev.filter((s) => s.mbid !== mbid));
+      feedbackTimeoutRef.current = setTimeout(() => {
+        const base = (allPlaylistTracks.length > 0
+          ? allPlaylistTracks
+          : importedSeeds.length > 0
+          ? importedSeeds
+          : seeds.map((s) => ({ artist: s.artist, title: s.title }))
+        ).slice(-500);
+        void requestRecommendations({ songs: base }, cleaned);
+      }, 350);
     }
   };
 
   const displayTracks = useMemo(() => {
+    // 1. Favorites Tab: show all tracks liked by the user
+    if (activeTab === "favorites") {
+      const likedMbids = new Set(Object.keys(feedback).filter((id) => feedback[id] === "like"));
+      if (likedMbids.size === 0) return [];
+      const liked: RankedTrack[] = [];
+      const seen = new Set<string>();
+
+      for (const track of rankedPool) {
+        if (likedMbids.has(track.mbid) && !seen.has(track.mbid)) {
+          seen.add(track.mbid);
+          liked.push(track);
+        }
+      }
+      for (const seed of seeds) {
+        if (likedMbids.has(seed.mbid) && !seen.has(seed.mbid)) {
+          seen.add(seed.mbid);
+          liked.push({
+            mbid: seed.mbid,
+            title: seed.title,
+            artist: seed.artist,
+            score: 100,
+            features: [],
+            pickedFrom: [],
+          });
+        }
+      }
+      for (const demo of INITIAL_FIGMA_TRACKS) {
+        if (likedMbids.has(demo.mbid) && !seen.has(demo.mbid)) {
+          seen.add(demo.mbid);
+          liked.push(demo);
+        }
+      }
+      return liked;
+    }
+
+    // 2. Normal recommendations pool
     if (rankedPool.length > 0) {
       let pool = rankedPool.filter((track) => feedback[track.mbid] !== "dislike");
 
-      // Strictly filter out any track already in the user's seeds / playlist
+      // Strictly filter out any track already in the user's full playlist / seeds
+      const playlistTracks = allPlaylistTracks.length > 0 ? allPlaylistTracks : importedSeeds;
       const seedMbids = new Set(seeds.map((s) => s.mbid));
-      const seedIdentities = new Set([
-        ...seeds.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`),
-        ...importedSeeds.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`),
-      ]);
+      const seedIdentities = new Set(
+        playlistTracks.map((s) => recordingIdentity(s))
+      );
+      for (const s of seeds) {
+        seedIdentities.add(recordingIdentity({ artist: s.artist, title: s.title }));
+      }
 
       pool = pool.filter((track) => {
         if (seedMbids.has(track.mbid)) return false;
-        const identity = `${track.artist.toLowerCase()}:::${track.title.toLowerCase()}`;
-        if (seedIdentities.has(identity)) return false;
+        if (seedIdentities.has(recordingIdentity(track))) return false;
         return true;
       });
 
-      if (activeTab === "favorites") {
-        pool = pool.filter((t) => feedback[t.mbid] === "like");
-      }
       return pool.slice(0, 40);
     }
-    // When no recommendation pool is loaded yet, ALWAYS show the initial demo tracks so the playlist is never empty!
-    if (activeTab === "favorites") {
-      const liked = INITIAL_FIGMA_TRACKS.filter((t) => feedback[t.mbid] === "like");
-      return liked.length > 0 ? liked : INITIAL_FIGMA_TRACKS;
-    }
+
     return INITIAL_FIGMA_TRACKS;
-  }, [rankedPool, feedback, activeTab, seeds, importedSeeds]);
+  }, [rankedPool, feedback, activeTab, seeds, importedSeeds, allPlaylistTracks]);
 
   const activeTrack = selectedTrack;
   const spotifyUrl = spotifyLinks[activeTrack.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;

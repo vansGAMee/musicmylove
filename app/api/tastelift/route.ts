@@ -71,7 +71,7 @@ export async function handleTasteLiftPost(request: Request, dependencies: TasteL
         score: track.slateScore ?? track.score,
         strongestTasteHead: track.tasteHeadIndex,
         seedSupport: track.seedSupport ?? 0,
-        popularityPercentile: track.popularityPercentile ?? 0,
+        popularityPercentile: track.popularityPercentile ?? 0.5,
         noveltyLiftScore: track.liftScore ?? 0,
         spotifyLink: spotifySearch(track),
       })),

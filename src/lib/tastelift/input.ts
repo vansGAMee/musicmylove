@@ -113,7 +113,7 @@ function extractArtistAndTitle(entry: unknown): { artist?: string; title?: strin
   };
 }
 
-function spotifyHistorySongs(value: readonly unknown[]): Record<string, unknown>[] {
+function spotifyHistorySongs(value: readonly unknown[], options?: { unlimited?: boolean }): Record<string, unknown>[] {
   const aggregated = new Map<string, { row: Record<string, unknown>; playTime: number; plays: number; first: number }>();
   value.forEach((entry, index) => {
     const extracted = extractArtistAndTitle(entry);
@@ -131,9 +131,9 @@ function spotifyHistorySongs(value: readonly unknown[]): Record<string, unknown>
       aggregated.set(key, { row, playTime, plays: 1, first: index });
     }
   });
-  return [...aggregated.values()]
-    .sort((left, right) => right.playTime - left.playTime || right.plays - left.plays || left.first - right.first)
-    .slice(0, 500)
+  const list = [...aggregated.values()]
+    .sort((left, right) => right.playTime - left.playTime || right.plays - left.plays || left.first - right.first);
+  return (options?.unlimited ? list : list.slice(0, 500))
     .map((item) => item.row);
 }
 
@@ -196,7 +196,7 @@ export function detectDelimiter(headerLine: string): string {
  * Universal parser: extracts tracks from JSON (any format), CSV (Exportify or general),
  * or line-by-line TXT.
  */
-export function parseFileContentToSongs(text: string, options?: { allowPartial?: boolean }): TasteSeedInput[] {
+export function parseFileContentToSongs(text: string, options?: { allowPartial?: boolean; unlimited?: boolean }): TasteSeedInput[] {
   const content = text.replace(/^\uFEFF/u, "").trim();
   if (!content) return [];
 
@@ -373,7 +373,7 @@ export function parseFileContentToSongs(text: string, options?: { allowPartial?:
 }
 
 /** Validates input and removes only exact normalized artist/title duplicates in input order. */
-export function parseTasteInput(value: unknown, options?: { allowPartial?: boolean }): TasteSeedInput[] {
+export function parseTasteInput(value: unknown, options?: { allowPartial?: boolean; unlimited?: boolean }): TasteSeedInput[] {
   let rawList: unknown[] | undefined;
   let isHistory = false;
 
@@ -455,9 +455,9 @@ export function parseTasteInput(value: unknown, options?: { allowPartial?: boole
     throw new TasteInputError([{ path: "songs", code: "invalid_type", message: "songs must be an array" }]);
   }
 
-  const songs = isHistory ? spotifyHistorySongs(rawList) : rawList;
+  const songs = isHistory ? spotifyHistorySongs(rawList, options) : rawList;
   const minRequired = options?.allowPartial ? 1 : 5;
-  if (songs.length < minRequired || (!isHistory && songs.length > 500)) {
+  if (songs.length < minRequired || (!isHistory && !options?.unlimited && songs.length > 500)) {
     throw new TasteInputError([{ path: "songs", code: "out_of_range", message: `songs must contain between ${minRequired} and 500 entries` }]);
   }
 

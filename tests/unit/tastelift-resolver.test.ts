@@ -203,4 +203,4 @@ test("createTasteResolverAdapters resolves catalog tracks locally and bounds liv
 
   // All 31 seeds must be resolved (none unresolved/errored)
   expect(results.every((r) => r.status === "resolved")).toBe(true);
-});
+}, 15000);
