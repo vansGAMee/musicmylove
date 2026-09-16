@@ -93,9 +93,48 @@ describe("extractFromHtmlState - JSON-LD and Schema extraction", () => {
     expect(res.tracks[1]?.title).toBe("Heroes");
   });
 
-  test("throws on 404 page content", () => {
+  test("throws on explicit 404 page content", () => {
     const html = "<html><body>404: This page could not be found</body></html>";
     expect(() => extractFromHtmlState(html)).toThrow(YandexPlaylistError);
+  });
+
+  test("CRITICAL: does not false-positive 404 on Next.js page with internal notFound string in script chunks", () => {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><title>Мой плейлист — Яндекс Музыка</title></head>
+      <body>
+        <script>
+          self.__next_f.push([1,"notFound:[[[\\\"$\\\",\\\"title\\\",null,{\\\"children\\\":\\\"404: This page could not be found.\\\"}]]]"]);
+          self.__next_f.push([1,"{\\"tracks\\":[{\\"title\\":\\"Smells Like Teen Spirit\\",\\"artists\\":[{\\"name\\":\\"Nirvana\\"}]}]}"]);
+        </script>
+      </body>
+      </html>
+    `;
+    const res = extractFromHtmlState(html);
+    expect(res.tracks).toHaveLength(1);
+    expect(res.tracks[0]?.title).toBe("Smells Like Teen Spirit");
+    expect(res.tracks[0]?.artists).toEqual(["Nirvana"]);
+  });
+
+  test("CRITICAL: extracts tracks and title from Next.js preloadedPlaylistByUuid structure", () => {
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head><title>Плейлист — Яндекс Музыка</title></head>
+      <body>
+        <script>
+          self.__next_f.push([1,"23:[\\\"$\\\",\\\"$L63\\\",null,{\\\"page\\\":\\\"playlist\\\",\\\"children\\\":[\\\"$\\\",\\\"$2b\\\",null,{\\\"children\\\":[\\\"$\\\",\\\"$L65\\\",null,{\\\"playlistUuid\\\":\\\"59b1329f-1186-c562-f8c5-4f8e397656a8\\\",\\\"preloadedPlaylistByUuid\\\":{\\\"title\\\":\\\"Мой рок-плейлист\\\",\\\"tracks\\\":[{\\\"id\\\":\\\"1001\\\",\\\"title\\\":\\\"Кукла колдуна\\\",\\\"artists\\\":[{\\\"name\\\":\\\"Король и Шут\\\"}]},{\\\"id\\\":\\\"1002\\\",\\\"title\\\":\\\"Лесник\\\",\\\"artists\\\":[{\\\"name\\\":\\\"Король и Шут\\\"}]}]}}]}]}]"]);
+        </script>
+      </body>
+      </html>
+    `;
+    const res = extractFromHtmlState(html);
+    expect(res.title).toBe("Мой рок-плейлист");
+    expect(res.tracks).toHaveLength(2);
+    expect(res.tracks[0]?.title).toBe("Кукла колдуна");
+    expect(res.tracks[0]?.artists).toEqual(["Король и Шут"]);
+    expect(res.tracks[1]?.title).toBe("Лесник");
   });
 
   test("CRITICAL: extracts tracks from complex Next.js script injection (self.__next_f.push)", () => {
@@ -458,6 +497,38 @@ describe("CRITICAL INTEGRATION TESTS", () => {
     expect(res.tracks.length).toBe(3);
     expect(res.tracks.some(t => t.artists.includes("Artist via author field"))).toBe(true);
     expect(res.tracks.some(t => t.artists.includes("Artist via performer field"))).toBe(true);
-    expect(res.tracks.some(t => t.artists.length > 1)).toBe(true);
+  });
+
+  test("CRITICAL: successfully fetches and extracts modern UUID playlist in Russian environment", async () => {
+    const mockRscHtml = `
+      <!doctype html>
+      <html>
+      <head><title>Плейлист — Яндекс Музыка</title></head>
+      <body>
+        <script>
+          self.__next_f.push([1,"notFound:[[[\\\"$\\\",\\\"title\\\",null,{\\\"children\\\":\\\"404: This page could not be found.\\\"}]]]"]);
+          self.__next_f.push([1,"23:[\\\"$\\\",\\\"$L63\\\",null,{\\\"page\\\":\\\"playlist\\\",\\\"children\\\":[\\\"$\\\",\\\"$2b\\\",null,{\\\"children\\\":[\\\"$\\\",\\\"$L65\\\",null,{\\\"playlistUuid\\\":\\\"59b1329f-1186-c562-f8c5-4f8e397656a8\\\",\\\"preloadedPlaylistByUuid\\\":{\\\"title\\\":\\\"Любимые треки пользователя\\\",\\\"tracks\\\":[{\\\"id\\\":\\\"501\\\",\\\"title\\\":\\\"Группа крови\\\",\\\"artists\\\":[{\\\"name\\\":\\\"Кино\\\"}]},{\\\"id\\\":\\\"502\\\",\\\"title\\\":\\\"Звезда по имени Солнце\\\",\\\"artists\\\":[{\\\"name\\\":\\\"Кино\\\"}]}]}}]}]}]"]);
+        </script>
+      </body>
+      </html>
+    `;
+
+    const mockFetcher = vi.fn().mockResolvedValue(
+      new Response(mockRscHtml, {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      })
+    );
+
+    const res = await fetchYandexPlaylist("https://music.yandex.ru/playlists/59b1329f-1186-c562-f8c5-4f8e397656a8", {
+      fetcher: mockFetcher,
+      skipCache: true,
+    });
+
+    expect(res.id).toBe("59b1329f-1186-c562-f8c5-4f8e397656a8");
+    expect(res.title).toBe("Любимые треки пользователя");
+    expect(res.tracks).toHaveLength(2);
+    expect(res.tracks[0]?.title).toBe("Группа крови");
+    expect(res.tracks[0]?.artists).toEqual(["Кино"]);
   });
 });

@@ -537,6 +537,81 @@ function extractTracksFromAny(obj: unknown, maxDepth: number = 10): YandexTrack[
   return tracks;
 }
 
+function findTitleInAny(obj: unknown, maxDepth: number = 8): string | undefined {
+  if (maxDepth === 0 || typeof obj !== "object" || obj === null) return undefined;
+  const record = obj as Record<string, unknown>;
+  if (typeof record.preloadedPlaylistByUuid === "object" && record.preloadedPlaylistByUuid !== null) {
+    const pl = record.preloadedPlaylistByUuid as Record<string, unknown>;
+    if (typeof pl.title === "string" && pl.title && !pl.title.includes("собираем музыку")) return pl.title;
+  }
+  if (typeof record.playlist === "object" && record.playlist !== null) {
+    const pl = record.playlist as Record<string, unknown>;
+    if (typeof pl.title === "string" && pl.title && !pl.title.includes("собираем музыку")) return pl.title;
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findTitleInAny(item, maxDepth - 1);
+      if (found) return found;
+    }
+  } else {
+    for (const val of Object.values(record)) {
+      if (typeof val === "object" && val !== null) {
+        const found = findTitleInAny(val, maxDepth - 1);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+function findOwnerInAny(obj: unknown, maxDepth: number = 8): string | undefined {
+  if (maxDepth === 0 || typeof obj !== "object" || obj === null) return undefined;
+  const record = obj as Record<string, unknown>;
+  if (typeof record.preloadedPlaylistByUuid === "object" && record.preloadedPlaylistByUuid !== null) {
+    const pl = record.preloadedPlaylistByUuid as Record<string, unknown>;
+    if (typeof pl.owner === "string" && pl.owner) return pl.owner;
+    if (typeof pl.owner === "object" && pl.owner !== null) {
+      const o = pl.owner as Record<string, unknown>;
+      if (typeof o.login === "string") return o.login;
+      if (typeof o.name === "string") return o.name;
+    }
+  }
+  if (typeof record.playlist === "object" && record.playlist !== null) {
+    const pl = record.playlist as Record<string, unknown>;
+    if (typeof pl.owner === "string" && pl.owner) return pl.owner;
+    if (typeof pl.owner === "object" && pl.owner !== null) {
+      const o = pl.owner as Record<string, unknown>;
+      if (typeof o.login === "string") return o.login;
+      if (typeof o.name === "string") return o.name;
+    }
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findOwnerInAny(item, maxDepth - 1);
+      if (found) return found;
+    }
+  } else {
+    for (const val of Object.values(record)) {
+      if (typeof val === "object" && val !== null) {
+        const found = findOwnerInAny(val, maxDepth - 1);
+        if (found) return found;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function isExplicit404(html: string): boolean {
+  return (
+    /<title>[^<]*404\b[^<]*<\/title>/i.test(html) ||
+    /<title>[^<]*Страница не найдена[^<]*<\/title>/i.test(html) ||
+    /<h1[^>]*>\s*404\s*<\/h1>/i.test(html) ||
+    /<h1[^>]*>[^<]*Страница не найдена[^<]*<\/h1>/i.test(html) ||
+    /<(?:body|html)[^>]*>\s*404:\s*This page could not be found\s*<\/(?:body|html)>/i.test(html) ||
+    /class="[^"]*next-error-h1[^"]*"[^>]*>\s*404\s*</i.test(html)
+  );
+}
+
 /**
  * Extracts metadata and tracks from Next.js server-rendered HTML or embedded state.
  * Uses multiple fallback strategies to handle various Yandex HTML structures.
@@ -547,10 +622,8 @@ export function extractFromHtmlState(html: string): {
   title?: string;
   tracks: YandexTrack[];
 } {
-  // Detect actual 404 pages - be specific to avoid matching Next.js framework strings like "notFound" in RSC routing
-  if (html.includes("404: This page could not be found") ||
-      html.includes("Страница не найдена") ||
-      />\s*404\s*</.test(html)) {
+  // Detect actual 404 pages - match title/heading, avoid matching Next.js framework "notFound" strings in script chunks
+  if (isExplicit404(html)) {
     throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
   }
 
@@ -603,11 +676,19 @@ export function extractFromHtmlState(html: string): {
     }
   }
 
-  // 4. NEW: Extract and parse all JSON from script tags
+  // 4. Extract and parse all JSON from script tags (Next.js pushes, preloaded data)
   if (tracks.length === 0) {
     try {
       const jsonObjects = extractJsonFromScripts(html);
       for (const obj of jsonObjects) {
+        if (!title || title === "Плейлист" || title.includes("Яндекс") || title.includes("собираем музыку")) {
+          const foundTitle = findTitleInAny(obj);
+          if (foundTitle) title = foundTitle;
+        }
+        if (!owner) {
+          const foundOwner = findOwnerInAny(obj);
+          if (foundOwner) owner = foundOwner;
+        }
         const extracted = extractTracksFromAny(obj, 8);
         tracks.push(...extracted);
       }
@@ -616,26 +697,20 @@ export function extractFromHtmlState(html: string): {
     }
   }
 
-  // 5. Fallback: Old regex-based extraction for simple patterns (with improvements)
+  // 5. Fallback: regex-based extraction on unescaped HTML
   if (tracks.length === 0) {
-    const trackMatches = html.matchAll(/"title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*"artists"\s*:\s*\[/g);
-    for (const m of trackMatches) {
-      const trackTitle = m[1]!.replace(/\\"/g, '"').trim();
-      if (trackTitle) {
-        // Try to find the artist name in nearby content
-        const idx = html.indexOf(m[0]!) + m[0]!.length;
-        const snippet = html.substring(idx, Math.min(idx + 300, html.length));
-        const artistMatch = /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i.exec(snippet);
-        if (artistMatch) {
-          const artistName = artistMatch[1]!.replace(/\\"/g, '"').trim();
-          if (artistName) {
-            tracks.push({
-              id: `${artistName} - ${trackTitle}`,
-              title: trackTitle,
-              artists: [artistName],
-            });
-          }
-        }
+    const unescaped = html.replace(/\\"/g, '"');
+    const trackRe = /"title"\s*:\s*"([^"\\]+)"\s*,\s*"artists"\s*:\s*\[(?:\{\s*"name"\s*:\s*"([^"\\]+)"|"([^"\\]+)")/g;
+    let m: RegExpExecArray | null;
+    while ((m = trackRe.exec(unescaped)) !== null) {
+      const trackTitle = m[1]!.trim();
+      const artistName = (m[2] || m[3] || "Unknown Artist").trim();
+      if (trackTitle && !trackTitle.includes("Яндекс")) {
+        tracks.push({
+          id: `${artistName} - ${trackTitle}`,
+          title: trackTitle,
+          artists: [artistName],
+        });
       }
     }
   }
@@ -863,10 +938,8 @@ export async function fetchYandexPlaylist(
         "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку)."
       );
     }
-    // Detect actual 404 - avoid matching Next.js framework "notFound" strings
-    if (html.includes("404: This page could not be found") ||
-        html.includes("Страница не найдена") ||
-        />\s*404\s*</.test(html)) {
+    // Detect actual 404 - match title/heading, avoid matching Next.js framework "notFound" strings in script chunks
+    if (isExplicit404(html)) {
       throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
     }
     throw new YandexPlaylistError(

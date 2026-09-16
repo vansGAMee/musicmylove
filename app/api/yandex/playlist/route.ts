@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { fetchYandexPlaylist, YandexPlaylistError } from "../../../../src/lib/yandex/playlist";
+import {
+  fetchYandexPlaylist,
+  normalizeYandexPlaylistUrl,
+  YandexPlaylistError,
+} from "../../../../src/lib/yandex/playlist";
 import { yandexRateLimiter, getClientIp } from "../../../../src/lib/rate-limit";
 
 // Vercel Serverless maximum execution limit (up to 60s supported)
@@ -23,6 +27,18 @@ async function processYandexPlaylist(url: string, isGet: boolean) {
       { headers }
     );
   } catch (error) {
+    let iframeUrl: string | undefined;
+    let playlistUuid: string | undefined;
+    try {
+      const norm = normalizeYandexPlaylistUrl(url);
+      playlistUuid = norm.uuid;
+      if (norm.uuid) {
+        iframeUrl = `https://music.yandex.ru/iframe/playlist/${norm.uuid}`;
+      } else if (norm.owner && norm.kind) {
+        iframeUrl = `https://music.yandex.ru/iframe/playlist/${encodeURIComponent(norm.owner)}/${norm.kind}`;
+      }
+    } catch {}
+
     if (error instanceof YandexPlaylistError) {
       const statusMap: Record<string, number> = {
         invalid_url: 400,
@@ -32,7 +48,13 @@ async function processYandexPlaylist(url: string, isGet: boolean) {
         geo_blocked: 451,
       };
       return NextResponse.json(
-        { ok: false, error: error.message, code: error.code },
+        {
+          ok: false,
+          error: error.message,
+          code: error.code,
+          iframeUrl,
+          playlistUuid,
+        },
         { status: statusMap[error.code] ?? 500 }
       );
     }
