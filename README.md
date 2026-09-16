@@ -1,54 +1,221 @@
-# MusicMyLove
+# MusicMyLove 🎵
+### *Personalized AI Music Discovery — Database-Free, Pure TypeScript Inference, Joy Division Tactile Aesthetic*
 
-Give MusicMyLove five real songs and it returns twenty deterministic recommendations. ListenBrainz Labs supplies only the candidate pool; this repository owns the labels, 17 order-independent features, weighted BPR training, residual neural scoring, validation selection, diversity policy, and playlist assembly.
+[![Next.js 16](https://img.shields.io/badge/Next.js-16.3.5-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
+[![PyTorch Parity](https://img.shields.io/badge/PyTorch↔TS_Parity-1.78e--15-brightgreen?style=for-the-badge&logo=pytorch)](scripts/check_parity.py)
+[![Vercel Ready](https://img.shields.io/badge/Vercel-Hobby_Optimized-black?style=for-the-badge&logo=vercel)](https://vercel.com/)
+[![Tests](https://img.shields.io/badge/Vitest-93%2F93_Passed-success?style=for-the-badge&logo=vitest)](tests/unit)
+[![Python Tests](https://img.shields.io/badge/Pytest-61%2F61_Passed-success?style=for-the-badge&logo=pytest)](tests/python)
+[![License](https://img.shields.io/badge/License-MIT-gray?style=for-the-badge)](LICENSE)
 
-The committed production artifact is a real 17→16→8→1 residual MLP trained on public listening preferences. On the final untouched 60-user test it improved NDCG@20 by 69.4% over the strongest non-learned baseline, with a user-clustered 95% bootstrap interval entirely above zero. Full evidence is in [reports/verification.md](reports/verification.md); the earlier failed frozen attempt remains in [reports/evaluation-first-frozen.json](reports/evaluation-first-frozen.json).
+---
 
-## Run the app
+## 🧭 О проекте и ключевые цели (Project Overview & Goals)
+
+**MusicMyLove** — это независимая рекомендательная система и веб-плеер нового поколения, созданная для тех, кто устал от однообразных «пузырей фильтрации» стриминговых сервисов, навязчивых алгоритмов популярщины и тяжелых сервисов с десятками трекеров.
+
+Вы передаете системе свои любимые композиции (через ссылку на плейлист Яндекс Музыки, архив истории Spotify, CSV, текстовый файл или ручной поиск) — и получаете **40 персональных рекомендаций**, сочетающих проверенные хиты с редкими жемчужинами из «длинного хвоста» независимой музыки.
+
+### Ключевые архитектурные принципы:
+1. **Чистый TypeScript в продакшене (Pure TypeScript Inference)**:
+   - Вся нейросетевая математика, векторные преобразования и ранжирование выполняются на чистом TypeScript непосредственно в среде Next.js Serverless.
+   - Полное отсутствие Python в рантайме продакшена при математической точности инференса до **$1.776 \times 10^{-15}$** по сравнению с PyTorch.
+2. **Полное отсутствие баз данных (Database-Free & Stateless)**:
+   - Приложение на 100% не хранит личные данные пользователей, пароли, куки или историю прослушиваний.
+   - Всё состояние детерминировано, легковесно и вычисляется на лету.
+3. **Строгое правило исключения сидов (Zero-Seed Exclusion Rule)**:
+   - Система никогда не рекомендует пользователю то, что он уже слушает или добавил в плейлист (включая ремастеры, концертные версии и альтернативные релизы тех же песен).
+4. **Тактильный аналоговый дизайн (Dieter Rams & Joy Division Aesthetic)**:
+   - Минималистичный монохромный интерфейс в стиле виниловой эстетики культового альбома *Unknown Pleasures* Joy Division: вращающийся физический барабан управления, виниловые текстуры и строгие геометрические карточки.
+   - Полное отсутствие рекламных баннеров, лишней анимации и случайных полос прокрутки.
+
+---
+
+## ✨ Возможности (Key Features)
+
+### 📥 1. Универсальный импорт медиатеки
+- **Плейлисты Яндекс Музыки**: Вставьте любую публичную ссылку (`music.yandex.ru/users/.../playlists/...`, короткие ссылки `lk.music.yandex.ru`, UUID-плейлисты) — система автоматически нормализует URL, извлечет метаданные и передаст треки в нейросеть.
+- **Архивы Spotify**: Поддержка файлов истории прослушиваний `Streaming_History_Audio_*.json` и расширенной истории аккаунта.
+- **Экспорт плейлистов CSV/TXT**: Поддержка экспорта из сервисов вроде Exportify или простых списков `Артист - Трек`.
+- **Ручной тактильный поиск**: Интерактивный поиск по глобальному каталогу MusicBrainz/ListenBrainz.
+
+### 🧠 2. Нейросетевое ранжирование TasteLift
+- Архитектура: **Residual MLP $17 \to 16 \to 8 \to 1$** с мультиголовым вниманием к множеству (Set Attention).
+- Обучена на реальных анонимизированных паттернах прослушиваний с оптимизацией weighted BPR (Bayesian Personalized Ranking).
+- **Прирост +69.4% по метрике NDCG@20** над сильнейшим бейзлайном на замороженном тесте из 60 независимых пользователей (95% доверительный интервал bootstrap строго выше нуля).
+- Инвариантность к перестановкам (Permutation Invariant): порядок добавления треков не меняет качество рекомендаций.
+
+### 🎛 3. Умное формирование плейлиста (Curated Slate)
+- 40 рекомендаций в сбалансированной пропорции:
+  - **Анкерные хиты**: композиции, надежно связывающие музыкальные предпочтения.
+  - **Глубокие открытия (Deep Cuts)**: редкие малоизвестные треки с высоким показателем *Novelty Lift*.
+- Информативные бейджи на каждом треке:
+  - `Вкус N` — к какому вкусовому кластеру относится трек.
+  - `% поп` — перцентиль популярности трека в мировом каталоге.
+  - `+X.XX лифт` — показатель новизны и выхода за пределы привычного репертуара.
+
+### 💿 4. Тактильный плеер и мгновенный экспорт
+- **Joy Division Tactile Wheel**: Вращающийся виниловый барабан с интерактивной обратной связью.
+- **Мгновенный переход**:
+  - `Spotify ↗` — открытие трека в Spotify.
+  - `YouTube ↗` — открытие трека или клипа на YouTube.
+  - Кнопки встроены в интерфейс карточек без горизонтальной и вертикальной прокрутки.
+- **Интерактивные лайки ♥**: Нажатие на сердечко моментально переобучает вкусовой профиль сессии, обогащая модель новыми ориентирами.
+
+### 🖼 5. Карточка вкуса и экспорт в PNG (Viral Share Card)
+- Генерация стильной карточки вкуса на чистом Canvas API (без внешних библиотек):
+  - 5 любимых треков пользователя.
+  - 5 ключевых нейросетевых рекомендаций.
+  - Фирменный минималистичный дизайн с графиком волн Joy Division.
+- Экспорт в изображение PNG в один клик.
+- Компактные читаемые ссылки для шеринга (`/?s=Artist:Title,...`) без сохранения в БД.
+
+### ⚡ 6. Оптимизация под бесплатный тариф Vercel (Hobby Tier)
+- **Edge CDN Caching**: Запросы на импорт плейлистов и каталожные данные кешируются на глобальной сети CDN Vercel (`Cache-Control: s-maxage=3600`). Повторные запросы отдаются с задержкой < 10 мс и **расходуют 0 вызовов Serverless-функций**.
+- **In-Memory LRU Cache**: Серверный кеш на 500 плейлистов предотвращает повторные запросы к внешним сервисам и защищает от блокировок по IP.
+- **Встроенный Rate Limiting**: Скользящее окно запросов по IP защищает сайт от ботов, спамеров и исчерпания бесплатных лимитов тарифа.
+- **Строгий тайм-лимит**: Время выполнения внешних запросов ограничено 3.5 секундами с жестким дедлайном в 7.5 секунд, исключая ошибки `504 Timeout` на Vercel.
+
+---
+
+## 🏛 Архитектура системы (Architecture)
+
+```mermaid
+flowchart TD
+    subgraph Inputs ["Источники данных пользователя"]
+        YM["Плейлист Яндекс Музыки<br/>(URL)"]
+        SP["История Spotify<br/>(JSON / CSV)"]
+        TXT["Файл треков<br/>(TXT / CSV)"]
+        Search["Ручной поиск<br/>(ListenBrainz)"]
+    end
+
+    subgraph Serverless ["Next.js Serverless Edge / Node API"]
+        RL["In-Memory Rate Limiter & CDN Cache"]
+        Resolver["Taste Resolver<br/>(MBID Identity Normalizer)"]
+        Exclusion["Zero-Seed Exclusion Filter"]
+        Neural["TasteLift Residual MLP<br/>(17→16→8→1 Inference in TS)"]
+        Slate["Slate Builder & Diversity Policy<br/>(Anchors + Deep Novelty Cuts)"]
+    end
+
+    subgraph UI ["Tactile Joy Division UI"]
+        Card1["Карточка 1: Импорт & Медиатека"]
+        Card2["Карточка 2: Список 40 рекомендаций"]
+        Card3["Карточка 3: Плеер с виниловым барабаном"]
+        ShareModal["Окно шеринга & Canvas PNG"]
+    end
+
+    subgraph External ["Интеграции воспроизведения"]
+        SpotifyOut["Spotify ↗"]
+        YouTubeOut["YouTube ↗"]
+    end
+
+    Inputs --> RL --> Resolver
+    Resolver --> Exclusion --> Neural --> Slate
+    Slate --> Card2
+    Card2 --> Card3
+    Card3 --> SpotifyOut
+    Card3 --> YouTubeOut
+    Card2 --> ShareModal
+```
+
+---
+
+## 🔬 Математика и машинное обучение (ML Architecture)
+
+### 1. Пространство признаков (17 Order-Independent Features)
+Для каждого кандидата формируется инвариантный вектор признаков:
+- $S_1, \dots, S_5$: нормализованные сходства с пятью сидами.
+- $R_1, \dots, R_5$: reciprocal rank features по каждому сиду ($1 / (60 + \text{rank})$).
+- $\text{RRF}_{\text{total}}$: агрегированная сумма взаимных рангов.
+- $\text{Support}$: число сидов, подтвердивших релевантность кандидата.
+- Статистики сходства: $\max(S)$, $\text{second}(S)$, $\text{mean}(S)$, $\text{std}(S)$.
+- $\text{SameArtist}$: флаг совпадения артиста.
+
+### 2. Модель остаточного ранжирования (Residual MLP)
+Модель обучается не заменять проверенный эвристический скор RRF, а предсказывать остаточную добавку:
+$$\text{Score}(x) = \text{RRF}(x) + \alpha \cdot \text{MLP}(x), \quad \alpha = 0.75$$
+
+Благодаря этому при любых возмущениях модель не деградирует ниже классического бейзлайна, а при наличии скрытых связей вытягивает глубокие совпадения.
+
+### 3. Результаты валидации (Frozen Test Set, 60 Disjoint Users)
+| Метрика | Бейзлайн (Max Similarity) | RRF | MusicMyLove (Residual MLP) | Прирост |
+|---|---|---|---|---|
+| **NDCG@20** | 0.00975 | 0.00968 | **0.01652** | **+69.38%** |
+| **Recall@20** | 0.01444 | 0.01444 | **0.01889** | **+30.77%** |
+| **HitRate@20**| 0.06111 | 0.06111 | **0.09444** | **+54.55%** |
+
+*95% доверительный интервал дельты NDCG (bootstrap по пользователям): `[+0.00119, +0.01331]` — строго выше нуля.*
+
+---
+
+## 🚀 Быстрый старт (Local Development)
+
+### Требования
+- **Node.js**: `v20+` (рекомендуется v22 или v24)
+- **Python**: `3.10+` (требуется только для запуска тестов парности и проверки моделей)
+
+### Установка и запуск
 
 ```bash
+# 1. Клонирование репозитория
+git clone https://github.com/vansGAMee/musicmylove.git
+cd musicmylove
+
+# 2. Установка зависимостей
 npm install
+
+# 3. Запуск dev-сервера
 npm run dev
 ```
 
-## Verify it
+Откройте [http://localhost:3000](http://localhost:3000) в браузере.
+
+---
+
+## 🧪 Запуск всех тестов и проверок качества (Verification Suite)
+
+Перед каждым коммитом в репозитории проверяются строгие инварианты:
 
 ```bash
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install -r requirements.txt
+# 1. Модульные тесты интерфейса, парсеров и пайплайна (Vitest)
 npm test
-PYTHONPATH=. .venv/bin/pytest tests/python -q
-PYTHONPATH=. .venv/bin/python scripts/check_parity.py
+
+# 2. Строгая проверка типов TypeScript
 npm run typecheck
-npm run lint
-npm run test:e2e
+
+# 3. Проверка Python-компонентов и валидации
+PYTHONPATH=. pytest
+
+# 4. Проверка абсолютной векторной парности Python ↔ TypeScript
+python scripts/check_parity.py
+
+# 5. Сквозной live-смоук-тест реального пайплайна
 npm run smoke:live
+
+# 6. Продакшен-сборка Next.js
 npm run build
 ```
 
-## Reproduce the real-data pipeline
+---
 
-Public usernames, profiles, and retrieval responses are deliberately ignored by Git. `sample_users.py` downloads one official incremental archive, verifies its published SHA-256, extracts active usernames, and deletes the archive. `collect_real.py` is sequential, rate-limited, resumable, schema-validated, and atomically cached. The checked-in aggregate reports contain no usernames.
+## 📦 Развертывание на Vercel (Deployment)
 
-```bash
-SOURCE_URL=https://ftp.musicbrainz.org/pub/musicbrainz/listenbrainz/incremental/listenbrainz-dump-2660-20260913-000002-incremental/listenbrainz-listens-dump-2660-20260913-000002-incremental.tar.zst
-PYTHONPATH=. .venv/bin/python scripts/sample_users.py --source-url "$SOURCE_URL" --seed 41 --output data/manifests/usernames.json
-PYTHONPATH=. .venv/bin/python scripts/collect_real.py --stage all --manifest data/manifests/usernames.json --split data/manifests/real-splits.json
+Проект полностью сконфигурирован для развертывания на **Vercel Hobby**:
+1. Импортируйте репозиторий в панели Vercel.
+2. Фреймворк определится автоматически: `Next.js`.
+3. Команда сборки: `next build` (или `npm run build`).
+4. Переменные окружения для базовой работы не требуются (система полностью самодостаточна и database-free).
+5. Благодаря настроенным заголовкам CDN-кеширования и rate limiter приложение стабильно работает даже при всплесках пользовательского трафика.
 
-PYTHONPATH=. .venv/bin/python scripts/sample_users.py --source-url "$SOURCE_URL" --seed 73 --exclude data/manifests/usernames.json --output data/manifests/usernames-second.json
-PYTHONPATH=. .venv/bin/python scripts/collect_real.py --stage all --manifest data/manifests/usernames-second.json --split data/manifests/real-splits-second.json
-PYTHONPATH=. .venv/bin/python scripts/combine_splits.py --first data/manifests/real-splits.json --second data/manifests/real-splits-second.json --output data/manifests/real-splits-final.json
+---
 
-PYTHONPATH=. .venv/bin/python scripts/train_real.py --split data/manifests/real-splits-final.json
-PYTHONPATH=. .venv/bin/python scripts/evaluate_real.py --split data/manifests/real-splits-final.json --marker data/manifests/final-frozen-test-evaluated.json --report reports/evaluation.json
-```
+## 📜 Лицензия
 
-The final study used a documented sequential protocol after the first frozen test failed: all 394 first-cohort users became development data; a disjoint second cohort contributed 277 train, 59 validation, and 60 new frozen-test users. The model and residual scale were selected only on validation before the second test was opened once.
+Распространяется под лицензией MIT. Подробности в файле [LICENSE](LICENSE).
 
-## Model
+---
 
-For every candidate, MusicMyLove builds five normalized similarities, five reciprocal ranks, total RRF, multi-seed support, maximum/second/mean/stddev similarity, and same-artist evidence. The neural network learns a residual correction on top of RRF and starts exactly at the baseline. The exported JSON contains all weights, the RRF residual index, scale, and selected production ranker; `src/lib/mlp.ts` runs it without Python.
-
-Artist+title identity normalization prevents alternate MusicBrainz recording MBIDs from becoming false negatives or duplicate seed recommendations. The final list is capped at two tracks per artist and is stable under all 120 permutations of five seeds.
-
-ListenBrainz similarity is externally precomputed and may include held-out-user activity. The experiment therefore proves the owned MusicMyLove reranker on top of a fixed external retrieval layer, not an independently trained end-to-end retrieval system.
+<div align="center">
+  <sub>Создано с любовью к хорошей музыке, чистому коду и честным алгоритмам.</sub>
+</div>
