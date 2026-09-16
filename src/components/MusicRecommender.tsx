@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RankedTrack, SeedTrack, Track } from "../lib/types";
 import { downloadTasteCardPng } from "../lib/exportCard";
+import { parseFileContentToSongs } from "../lib/tastelift/input";
+
+const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT"] as const;
 
 interface TasteLiftApiRecommendation {
   mbid: string;
@@ -35,15 +38,15 @@ const TRANSLATIONS = {
     themeLightAria: "Включить светлую тему",
     importEyebrow: "Импорт",
     yourLibrary: "Твоя медиатека",
-    dropzoneLabel: "Перетащите JSON-файл сюда",
-    dropzoneSublabel: "или нажмите для выбора",
+    dropzoneLabel: "Перетащите файл сюда",
+    dropzoneSublabel: "JSON, CSV или TXT список треков",
     chooseFile: "Выбрать файл",
     manualSearch: "Ручной поиск",
     searchPlaceholder: "Поиск трека или исполнителя…",
     searchAria: "Поиск песни",
     readingTaste: "Считывание вашего вкуса…",
     back: "← Назад",
-    uploadAria: "Загрузить JSON-файл",
+    uploadAria: "Загрузить файл с треками (JSON, CSV, TXT)",
     tracksCountSuffix: "треков",
     playlistEyebrow: "Плейлист",
     myPlaylist: "Мой плейлист",
@@ -78,8 +81,27 @@ const TRANSLATIONS = {
     tipTextCompact: "Угостить автора чаем ☕",
     tipButton: "Угостить",
     tipDismissAria: "Закрыть навсегда",
-    errorInvalidJson: "Неверный формат JSON. Загрузите файл истории прослушиваний Spotify.",
-    errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON.",
+    analyzingTaste: "Считывание вкуса…",
+    analyzingSubtitle: "Формируем персональный плейлист…",
+    buttonAnalyzing: "Считывание…",
+    howToGetFile: "Как получить файл?",
+    helpExportifyPre: "Экспорт плейлиста в CSV: ",
+    helpExportifyPost: " (в 1 клик через веб-сайт)",
+    helpSpotifyArchive: "Либо запросите архив данных в настройках аккаунта Spotify (JSON)",
+    yandexPlaceholder: "Ссылка на плейлист Яндекс Музыки…",
+    yandexSubmit: "Импортировать",
+    yandexImporting: "Импорт треков из Яндекс Музыки…",
+    yandexNotFound: "Плейлист не найден. Проверьте правильность ссылки.",
+    yandexPrivate: "Этот плейлист приватный. Сделайте его публичным в настройках.",
+    yandexInvalidUrl: "Некорректная ссылка на плейлист Яндекс Музыки",
+    yandexImportedSuccess: "Импортировано треков: {count}",
+    yandexEmpty: "В плейлисте не найдено треков",
+    importedBadge: "Импортировано: {count}",
+    moreTracksEllipsis: "+ ещё {count}…",
+    shareDisabledTooltip: "Сначала добавьте свои треки, чтобы поделиться вкусом",
+    errorInvalidJson: "Неверный формат файла. Загрузите JSON, CSV или TXT со списком треков.",
+    errorCouldNotParse: "Не удалось прочитать файл. Убедитесь, что это корректный JSON, CSV или TXT.",
+    errorNeedMoreSeeds: "Найдено треков: {count}. Добавьте еще через поиск ниже до 5.",
     errorRecommendationFailed: "Ошибка получения рекомендаций",
   },
   en: {
@@ -91,7 +113,7 @@ const TRANSLATIONS = {
     themeLightAria: "Switch to light mode",
     importEyebrow: "Import",
     yourLibrary: "your library",
-    dropzoneLabel: "Drop your JSON file here",
+    dropzoneLabel: "Drop your music file here",
     dropzoneSublabel: "or tap to browse",
     chooseFile: "Choose File",
     manualSearch: "Manual search",
@@ -99,7 +121,7 @@ const TRANSLATIONS = {
     searchAria: "Search for a song",
     readingTaste: "Reading the shape of your taste…",
     back: "← Back",
-    uploadAria: "Upload JSON file",
+    uploadAria: "Upload track file (JSON, CSV, TXT)",
     tracksCountSuffix: "tracks",
     playlistEyebrow: "playlist",
     myPlaylist: "My Playlist",
@@ -117,7 +139,7 @@ const TRANSLATIONS = {
     spotifyAria: "Open in Spotify",
     playerAria: "Now Playing Player",
     removeSeedAria: "Remove",
-    fromLibrary: "From your JSON library",
+    fromLibrary: "From your library",
     fromTasteLift: "MusicMyLove AI Recommendation",
     openSpotify: "Open in Spotify ↗",
     share: "Share",
@@ -134,25 +156,75 @@ const TRANSLATIONS = {
     tipTextCompact: "Tip the author a tea ☕",
     tipButton: "Tip tea",
     tipDismissAria: "Dismiss forever",
-    errorInvalidJson: "Invalid JSON format. Please upload Spotify streaming history JSON.",
-    errorCouldNotParse: "Could not parse file. Make sure it is valid JSON.",
+    analyzingTaste: "Reading your taste…",
+    analyzingSubtitle: "Generating your playlist…",
+    buttonAnalyzing: "Analyzing…",
+    howToGetFile: "How to get a file?",
+    helpExportifyPre: "Export playlist to CSV: ",
+    helpExportifyPost: " (1 click via browser)",
+    helpSpotifyArchive: "Or request your listening history from Spotify settings (JSON)",
+    yandexPlaceholder: "Yandex Music playlist link…",
+    yandexSubmit: "Import",
+    yandexImporting: "Importing from Yandex Music…",
+    yandexNotFound: "Playlist not found. Check the link.",
+    yandexPrivate: "This playlist is private. Please make it public in settings.",
+    yandexInvalidUrl: "Invalid Yandex Music playlist link",
+    yandexImportedSuccess: "Imported tracks: {count}",
+    yandexEmpty: "No tracks found in this playlist",
+    importedBadge: "Imported: {count}",
+    moreTracksEllipsis: "+ {count} more…",
+    shareDisabledTooltip: "Import or select your tracks first to share taste",
+    errorInvalidJson: "Invalid file format. Please upload a JSON, CSV, or TXT tracklist.",
+    errorCouldNotParse: "Could not parse file. Make sure it is valid JSON, CSV, or TXT.",
+    errorNeedMoreSeeds: "Found {count} tracks. Add more via search below to reach 5.",
     errorRecommendationFailed: "TasteLift recommendation failed",
   },
 };
 
-const readFeedback = (): Record<string, "like" | "dislike"> => {
-  if (typeof window === "undefined") return {};
-  try { return JSON.parse(localStorage.getItem("musicmylove:v1:feedback") ?? "{}"); } catch { return {}; }
-};
+interface MusicFact {
+  text: string;
+  isTea?: boolean;
+}
+
+const MUSIC_FACTS_RU: MusicFact[] = [
+  { text: "Обложка альбома Joy Division — это радиосигналы первого открытого пульсара CP 1919" },
+  { text: "На одной стороне винила всего одна непрерывная спиральная канавка длиной около 500 метров" },
+  { text: "Музыкальные «мурашки» (флиссон) вызывают мощный выброс дофамина в вентральном стриатуме мозга" },
+  { text: "Человеческое ухо способно различить два звуковых щелчка с разницей всего в 2 миллисекунды" },
+  { text: "Люди ярче всего помнят музыку своей юности из-за психологического эффекта reminiscence bump" },
+  { text: "Шумоподавление работает по принципу противофазы: волна гасится своей зеркально инвертированной копией" },
+  { text: "До 1939 года не было стандарта 440 Гц — нота Ля в разных странах настраивалась от 400 до 460 Гц" },
+  { text: "Мозг музыканта бессознательно продолжает считывать ритм даже во время пауз и тишины" },
+  { text: "Формат долгоиграющих пластинок LP (33⅓ об/мин) был впервые представлен в 1948 году" },
+  { text: "Слуховая кора перерабатывает музыку быстрее, чем зрительная кора распознает изображения" },
+  { text: "Глубокий суббас ощущается телом физически благодаря рецепторам вибрации кожи Пачини" },
+  { text: "Пока нейросеть вычисляет форму вкуса, можно угостить автора чаем ☕", isTea: true },
+];
+
+const MUSIC_FACTS_EN: MusicFact[] = [
+  { text: "The Joy Division cover depicts radio waves from CP 1919, the first discovered pulsar" },
+  { text: "A vinyl record side consists of a single continuous groove roughly 500 meters long" },
+  { text: "Musical chills (frisson) trigger a surge of dopamine in the brain's ventral striatum" },
+  { text: "The human auditory system can distinguish sounds separated by just 2 milliseconds" },
+  { text: "We recall music from our youth most vividly due to the reminiscence bump phenomenon" },
+  { text: "Active noise cancellation mirrors sound waves in anti-phase to cancel ambient noise" },
+  { text: "Before 1939's 440 Hz standard, concert pitch varied across Europe from 400 to 460 Hz" },
+  { text: "The auditory cortex stays rhythmically synchronized even during musical pauses and silences" },
+  { text: "The 33⅓ RPM LP format was introduced in 1948, revolutionizing long-form albums" },
+  { text: "The auditory cortex processes musical signals faster than the visual cortex processes images" },
+  { text: "Low-end sub bass is perceived physically through Pacinian vibration corpuscles in the skin" },
+  { text: "While the AI calculates your taste topology, you can tip the author a tea ☕", isTea: true },
+];
 
 export default function MusicRecommender() {
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Track[]>([]);
   const [seeds, setSeeds] = useState<SeedTrack[]>([]);
+  const [importedSeeds, setImportedSeeds] = useState<{ artist: string; title: string }[]>([]);
   const [rankedPool, setRankedPool] = useState<RankedTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>(readFeedback);
+  const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>({});
   const [spotifyLinks, setSpotifyLinks] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState<"all" | "favorites" | "recent" | "mood">("all");
   const [activeScreen, setActiveScreen] = useState<"import" | "playlist" | "player">("playlist");
@@ -165,6 +237,75 @@ export default function MusicRecommender() {
   const [showTipBanner, setShowTipBanner] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const t = isRussian ? TRANSLATIONS.ru : TRANSLATIONS.en;
+  const [formatIndex, setFormatIndex] = useState(0);
+  const [isFormatFading, setIsFormatFading] = useState(false);
+  const [showHelpPopover, setShowHelpPopover] = useState(false);
+  const [yandexUrl, setYandexUrl] = useState("");
+  const [yandexNotice, setYandexNotice] = useState("");
+  const [yandexLoading, setYandexLoading] = useState(false);
+  const [factIndex, setFactIndex] = useState(0);
+  const [isFactFading, setIsFactFading] = useState(false);
+  const facts = isRussian ? MUSIC_FACTS_RU : MUSIC_FACTS_EN;
+
+  useEffect(() => {
+    if (!loading) {
+      setIsFactFading(false);
+      return;
+    }
+
+    const nonTea = facts.filter((f) => !f.isTea);
+    const teaIdx = facts.findIndex((f) => f.isTea);
+
+    setFactIndex(Math.floor(Math.random() * nonTea.length));
+
+    const interval = setInterval(() => {
+      setIsFactFading(true);
+      setTimeout(() => {
+        const showTea = Math.random() < 0.12 && teaIdx !== -1;
+        if (showTea) {
+          setFactIndex(teaIdx);
+        } else {
+          setFactIndex((prev) => {
+            let next: number;
+            do {
+              next = Math.floor(Math.random() * nonTea.length);
+            } while (next === prev && nonTea.length > 1);
+            return next;
+          });
+        }
+        setIsFactFading(false);
+      }, 250);
+    }, 3200);
+
+    return () => clearInterval(interval);
+  }, [loading, isRussian, facts]);
+
+  useEffect(() => {
+    if (!showHelpPopover) return;
+    const timer = setTimeout(() => {
+      setShowHelpPopover(false);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [showHelpPopover]);
+
+  useEffect(() => {
+    if (!yandexNotice) return;
+    const timer = setTimeout(() => {
+      setYandexNotice("");
+    }, 4500);
+    return () => clearTimeout(timer);
+  }, [yandexNotice]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIsFormatFading(true);
+      setTimeout(() => {
+        setFormatIndex((prev) => (prev + 1) % SUPPORTED_FORMATS.length);
+        setIsFormatFading(false);
+      }, 400);
+    }, 3800);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     try {
@@ -218,7 +359,28 @@ export default function MusicRecommender() {
     }
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("musicmylove:v1:feedback");
+      if (saved) {
+        const parsed = JSON.parse(saved) as Record<string, string>;
+        const cleaned = Object.fromEntries(
+          Object.entries(parsed).filter(([id, v]) => !id.startsWith("demo-") || v === "like")
+        );
+        setFeedback(cleaned as Record<string, "like" | "dislike">);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const isTogglingThemeRef = useRef(false);
   const toggleTheme = () => {
+    if (isTogglingThemeRef.current) return;
+    isTogglingThemeRef.current = true;
+    setTimeout(() => {
+      isTogglingThemeRef.current = false;
+    }, 180);
     const nextTheme = theme === "light" ? "dark" : "light";
     setTheme(nextTheme);
     document.documentElement.setAttribute("data-theme", nextTheme);
@@ -230,7 +392,7 @@ export default function MusicRecommender() {
   };
 
   useEffect(() => {
-    if (query.trim().length < 2 || seeds.length >= 5) return;
+    if (query.trim().length < 2 || seeds.length >= 50) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -255,14 +417,77 @@ export default function MusicRecommender() {
     setLoading(true);
     setError("");
     try {
+      // Automatically incorporate user favorites ("like") into taste seed songs
+      let bodyToSend = payloadBody;
+      const likedMbids = Object.keys(feedback).filter((id) => feedback[id] === "like");
+      if (likedMbids.length > 0 && typeof payloadBody === "object" && payloadBody !== null) {
+        const bodyObj = payloadBody as { songs?: Array<{ artist: string; title: string; spotify_url?: string }> };
+        if (Array.isArray(bodyObj.songs)) {
+          const existingKeys = new Set(
+            bodyObj.songs.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`)
+          );
+          const extraLikedSongs: Array<{ artist: string; title: string }> = [];
+          for (const mbid of likedMbids) {
+            const track = rankedPool.find((t) => t.mbid === mbid) ?? seeds.find((s) => s.mbid === mbid) ?? INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
+            if (track) {
+              const key = `${track.artist.toLowerCase()}:::${track.title.toLowerCase()}`;
+              if (!existingKeys.has(key)) {
+                existingKeys.add(key);
+                extraLikedSongs.push({ artist: track.artist, title: track.title });
+              }
+            }
+          }
+          if (extraLikedSongs.length > 0) {
+            bodyToSend = {
+              ...bodyObj,
+              songs: [...bodyObj.songs, ...extraLikedSongs].slice(0, 500),
+            };
+          }
+        }
+      }
+
       const response = await fetch("/api/tastelift", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payloadBody),
+        body: JSON.stringify(bodyToSend),
       });
-      const payload = await response.json() as { error?: string; recommendations?: TasteLiftApiRecommendation[] };
+      const payload = (await response.json()) as {
+        error?: string;
+        recommendations?: TasteLiftApiRecommendation[];
+        seeds?: Array<{
+          artist?: string;
+          title?: string;
+          mbid?: string;
+          status?: string;
+          input?: { artist: string; title: string };
+          track?: { mbid?: string; artist: string; title: string; release?: string };
+        }>;
+      };
       if (!response.ok || !payload.recommendations) {
         throw new Error(payload.error ?? t.errorRecommendationFailed);
+      }
+      if (payload.seeds && payload.seeds.length > 0) {
+        const resolvedSeeds: SeedTrack[] = payload.seeds.slice(0, 5).map((s, idx) => {
+          const artist = s.track?.artist ?? s.input?.artist ?? s.artist ?? "";
+          const title = s.track?.title ?? s.input?.title ?? s.title ?? "";
+          return {
+            mbid: s.track?.mbid ?? s.mbid ?? `seed-resolved-${idx}`,
+            title,
+            artist,
+            score: 100,
+            features: [],
+            pickedFrom: [],
+          };
+        });
+        setSeeds(resolvedSeeds);
+        setImportedSeeds((prev) =>
+          prev.length > 0
+            ? prev
+            : payload.seeds!.map((s) => ({
+                artist: s.track?.artist ?? s.input?.artist ?? s.artist ?? "",
+                title: s.track?.title ?? s.input?.title ?? s.title ?? "",
+              }))
+        );
       }
       const mapped: RankedTrack[] = payload.recommendations.map((item) => ({
         mbid: item.mbid,
@@ -290,14 +515,62 @@ export default function MusicRecommender() {
     }
   };
 
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const sParam = params.get("s") ?? params.get("seeds");
+      if (!sParam) return;
+
+      const parsedItems = sParam
+        .split(",")
+        .map((item) => {
+          const colonIdx = item.indexOf(":");
+          if (colonIdx !== -1) {
+            return {
+              artist: item.slice(0, colonIdx).replace(/\+/g, " ").trim(),
+              title: item.slice(colonIdx + 1).replace(/\+/g, " ").trim(),
+            };
+          }
+          return {
+            artist: "",
+            title: item.replace(/\+/g, " ").trim(),
+          };
+        })
+        .filter((x) => x.title);
+
+      if (parsedItems.length === 0) return;
+
+      const seedTracks: SeedTrack[] = parsedItems.slice(0, 5).map((t, idx) => ({
+        mbid: `seed-shared-${idx}-${Date.now()}`,
+        title: t.title,
+        artist: t.artist,
+        score: 100,
+        features: [],
+        pickedFrom: [],
+      }));
+      setSeeds(seedTracks);
+      setImportedSeeds(parsedItems);
+
+      if (parsedItems.length >= 5) {
+        void requestRecommendations({ songs: parsedItems });
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const selectSeed = async (track: Track) => {
-    if (seeds.some((seed) => seed.mbid === track.mbid) || seeds.length >= 5) return;
+    if (seeds.some((seed) => seed.mbid === track.mbid) || seeds.length >= 50) return;
     const next = [...seeds, track];
     setSeeds(next);
     setQuery("");
     setSearchResults([]);
-    if (next.length === 5) {
-      await requestRecommendations({ songs: next.map((seed) => ({ artist: seed.artist, title: seed.title })) });
+    if (next.length === 5 || (importedSeeds.length > 0 && next.length > seeds.length)) {
+      const allSongs = [
+        ...importedSeeds,
+        ...next.map((seed) => ({ artist: seed.artist, title: seed.title })),
+      ];
+      await requestRecommendations({ songs: allSongs.slice(0, 500) });
     }
   };
 
@@ -305,22 +578,53 @@ export default function MusicRecommender() {
     setSeeds(seeds.filter((s) => s.mbid !== mbid));
   };
 
-  const parseAndSendJson = (text: string) => {
+  const handleUploadedContent = async (text: string) => {
+    setError("");
     try {
-      const parsed = JSON.parse(text);
-      void requestRecommendations(parsed);
+      const parsedSongs = parseFileContentToSongs(text, { allowPartial: true });
+      if (parsedSongs.length === 0) {
+        setError(t.errorCouldNotParse);
+        return;
+      }
+
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 5).map((s, idx) => ({
+        mbid: `seed-upload-${idx}-${Date.now()}`,
+        title: s.title,
+        artist: s.artist,
+        score: 100,
+        features: [],
+        pickedFrom: [],
+      }));
+      setSeeds(uploadSeeds);
+      setImportedSeeds(parsedSongs.map((s) => ({ artist: s.artist, title: s.title })));
+
+      if (parsedSongs.length >= 5) {
+        await requestRecommendations({
+          songs: parsedSongs.slice(0, 500).map((s) => ({
+            artist: s.artist,
+            title: s.title,
+            ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
+          })),
+        });
+      } else {
+        setError("");
+      }
     } catch {
-      setError(t.errorInvalidJson);
+      setError(t.errorCouldNotParse);
     }
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (e) => {
       const text = e.target?.result as string;
-      parseAndSendJson(text);
+      void handleUploadedContent(text);
+    };
+    reader.onloadend = () => {
+      input.value = "";
     };
     reader.readAsText(file);
   };
@@ -333,46 +637,248 @@ export default function MusicRecommender() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
-      parseAndSendJson(text);
+      void handleUploadedContent(text);
     };
     reader.readAsText(file);
   };
 
+  const handleYandexImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanUrl = yandexUrl.trim();
+    if (!cleanUrl || yandexLoading || loading) return;
+
+    setYandexLoading(true);
+    setYandexNotice(t.yandexImporting);
+    setError("");
+
+    try {
+      const res = await fetch("/api/yandex/playlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: cleanUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        let msg = data.error ?? t.errorRecommendationFailed;
+        if (data.code === "not_found") msg = t.yandexNotFound;
+        else if (data.code === "private") msg = t.yandexPrivate;
+        else if (data.code === "invalid_url") msg = t.yandexInvalidUrl;
+        setYandexNotice(msg);
+        return;
+      }
+
+      const tracksList: Array<{ id: string; title: string; artists: string[] }> =
+        Array.isArray(data.tracks) ? data.tracks : (data.playlist?.tracks ?? []);
+
+      if (tracksList.length === 0) {
+        setYandexNotice(t.yandexEmpty);
+        return;
+      }
+
+      const parsedSongs = tracksList.map((tr) => ({
+        title: tr.title,
+        artist: Array.isArray(tr.artists) ? tr.artists.join(", ") : (tr.artists || "Unknown Artist"),
+      }));
+
+      setImportedSeeds(parsedSongs);
+
+      const uploadSeeds: SeedTrack[] = parsedSongs.slice(0, 5).map((s, idx) => ({
+        mbid: `seed-ym-${idx}-${Date.now()}`,
+        title: s.title,
+        artist: s.artist,
+        score: 100,
+        features: [],
+        pickedFrom: [],
+      }));
+      setSeeds(uploadSeeds);
+      setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
+
+      await requestRecommendations({
+        songs: parsedSongs.slice(0, 500).map((s) => ({
+          artist: s.artist,
+          title: s.title,
+        })),
+      });
+    } catch (err) {
+      setYandexNotice(err instanceof Error ? err.message : t.errorRecommendationFailed);
+    } finally {
+      setYandexLoading(false);
+    }
+  };
+
   const saveFeedback = (mbid: string, value: "like" | "dislike") => {
-    const next = { ...feedback, [mbid]: feedback[mbid] === value ? undefined : value };
+    if (rankedPool.length === 0 && value === "dislike") {
+      return; // Keep demo preview tracks visible until real tracks are uploaded
+    }
+    const isCurrentlyLiked = feedback[mbid] === "like";
+    const nextValue = feedback[mbid] === value ? undefined : value;
+    const next = { ...feedback, [mbid]: nextValue };
     const cleaned = Object.fromEntries(Object.entries(next).filter(([, v]) => v !== undefined)) as Record<string, "like" | "dislike">;
     setFeedback(cleaned);
-    localStorage.setItem("musicmylove:v1:feedback", JSON.stringify(cleaned));
+    try {
+      localStorage.setItem("musicmylove:v1:feedback", JSON.stringify(cleaned));
+    } catch {
+      // ignore
+    }
+
+    // Auto-incorporate favorites into taste seeds:
+    if (value === "like" && !isCurrentlyLiked) {
+      const candidate = rankedPool.find((t) => t.mbid === mbid) ?? INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
+      if (candidate) {
+        setSeeds((prev) => {
+          if (
+            prev.some(
+              (s) =>
+                s.mbid === candidate.mbid ||
+                (s.title.toLowerCase() === candidate.title.toLowerCase() &&
+                  s.artist.toLowerCase() === candidate.artist.toLowerCase())
+            )
+          ) {
+            return prev;
+          }
+          return [
+            ...prev,
+            {
+              mbid: candidate.mbid,
+              title: candidate.title,
+              artist: candidate.artist,
+              score: 100,
+              features: [],
+              pickedFrom: [],
+            },
+          ];
+        });
+        setImportedSeeds((prev) => {
+          if (
+            prev.some(
+              (s) =>
+                s.title.toLowerCase() === candidate.title.toLowerCase() &&
+                s.artist.toLowerCase() === candidate.artist.toLowerCase()
+            )
+          ) {
+            return prev;
+          }
+          return [...prev, { artist: candidate.artist, title: candidate.title }];
+        });
+      }
+    } else if (value === "like" && isCurrentlyLiked) {
+      // User un-liked the track: remove from seeds if it was added
+      setSeeds((prev) => prev.filter((s) => s.mbid !== mbid));
+    }
   };
 
   const displayTracks = useMemo(() => {
-    const source = rankedPool.length > 0 ? rankedPool : INITIAL_FIGMA_TRACKS;
-    let pool = source.filter((track) => feedback[track.mbid] !== "dislike");
-    if (activeTab === "favorites") {
-      pool = pool.filter((t) => feedback[t.mbid] === "like");
+    if (rankedPool.length > 0) {
+      let pool = rankedPool.filter((track) => feedback[track.mbid] !== "dislike");
+
+      // Strictly filter out any track already in the user's seeds / playlist
+      const seedMbids = new Set(seeds.map((s) => s.mbid));
+      const seedIdentities = new Set([
+        ...seeds.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`),
+        ...importedSeeds.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`),
+      ]);
+
+      pool = pool.filter((track) => {
+        if (seedMbids.has(track.mbid)) return false;
+        const identity = `${track.artist.toLowerCase()}:::${track.title.toLowerCase()}`;
+        if (seedIdentities.has(identity)) return false;
+        return true;
+      });
+
+      if (activeTab === "favorites") {
+        pool = pool.filter((t) => feedback[t.mbid] === "like");
+      }
+      return pool.slice(0, 40);
     }
-    return pool.slice(0, 40);
-  }, [rankedPool, feedback, activeTab]);
+    // When no recommendation pool is loaded yet, ALWAYS show the initial demo tracks so the playlist is never empty!
+    if (activeTab === "favorites") {
+      const liked = INITIAL_FIGMA_TRACKS.filter((t) => feedback[t.mbid] === "like");
+      return liked.length > 0 ? liked : INITIAL_FIGMA_TRACKS;
+    }
+    return INITIAL_FIGMA_TRACKS;
+  }, [rankedPool, feedback, activeTab, seeds, importedSeeds]);
 
   const activeTrack = selectedTrack;
   const spotifyUrl = spotifyLinks[activeTrack.mbid] ?? `https://open.spotify.com/search/${encodeURIComponent(`${activeTrack.artist} ${activeTrack.title}`)}`;
 
+  const canShare = useMemo(() => {
+    return seeds.length > 0 || importedSeeds.length > 0 || rankedPool.length > 0;
+  }, [seeds.length, importedSeeds.length, rankedPool.length]);
+
   const shareSeeds = useMemo(() => {
-    if (seeds.length > 0) return seeds.map((s) => ({ title: s.title, artist: s.artist }));
+    if (seeds.length > 0) {
+      return seeds.slice(0, 5).map((s) => ({ title: s.title, artist: s.artist }));
+    }
+    if (importedSeeds.length > 0) {
+      return importedSeeds.slice(0, 5);
+    }
     const liked = Object.keys(feedback).filter((id) => feedback[id] === "like");
-    if (liked.length > 0) {
-      const pool = rankedPool.length > 0 ? rankedPool : INITIAL_FIGMA_TRACKS;
-      return pool
+    if (liked.length > 0 && rankedPool.length > 0) {
+      return rankedPool
         .filter((t) => liked.includes(t.mbid))
         .slice(0, 5)
         .map((t) => ({ title: t.title, artist: t.artist }));
     }
-    return INITIAL_FIGMA_TRACKS.slice(0, 4).map((t) => ({ title: t.title, artist: t.artist }));
-  }, [seeds, feedback, rankedPool]);
+    // NEVER fall back to dummy/initial tracks in Share!
+    return [];
+  }, [seeds, importedSeeds, feedback, rankedPool]);
 
   const shareRecs = useMemo(() => {
-    const pool = rankedPool.length > 0 ? rankedPool : INITIAL_FIGMA_TRACKS;
-    return pool.slice(0, 5).map((t) => ({
+    if (rankedPool.length === 0) {
+      // NEVER fall back to dummy/initial tracks in Share!
+      return [];
+    }
+    const pool = rankedPool;
+    if (pool.length <= 5) {
+      return pool.map((t) => ({
+        title: t.title,
+        artist: t.artist,
+        headIndex: t.tasteHeadIndex,
+        liftScore: t.liftScore,
+        popularityPercentile: t.popularityPercentile,
+      }));
+    }
+
+    // 1. Top 2 recognizable anchor hits from the head of recommendations
+    const topAnchors = pool.slice(0, 2);
+    const usedMbids = new Set(topAnchors.map((t) => t.mbid));
+    const usedArtists = new Set(topAnchors.map((t) => t.artist.toLowerCase()));
+
+    // 2. Candidates from the remainder of the pool (indices 2..end)
+    const remainder = pool.slice(2).filter((t) => !usedMbids.has(t.mbid));
+
+    // Sort remainder by highest novelty discovery (liftScore) & deeper rarity (lower popularity)
+    const sortedGems = [...remainder].sort((a, b) => {
+      const liftA = a.liftScore ?? 0;
+      const liftB = b.liftScore ?? 0;
+      if (Math.abs(liftB - liftA) > 0.08) {
+        return liftB - liftA;
+      }
+      return (a.popularityPercentile ?? 0.5) - (b.popularityPercentile ?? 0.5);
+    });
+
+    const deepGems: RankedTrack[] = [];
+    for (const track of sortedGems) {
+      const artistKey = track.artist.toLowerCase();
+      if (!usedArtists.has(artistKey)) {
+        deepGems.push(track);
+        usedArtists.add(artistKey);
+        if (deepGems.length === 3) break;
+      }
+    }
+
+    // Fallback if strict artist diversity didn't find 3
+    if (deepGems.length < 3) {
+      for (const track of sortedGems) {
+        if (!deepGems.some((g) => g.mbid === track.mbid)) {
+          deepGems.push(track);
+          if (deepGems.length === 3) break;
+        }
+      }
+    }
+
+    const combined = [...topAnchors, ...deepGems];
+    return combined.slice(0, 5).map((t) => ({
       title: t.title,
       artist: t.artist,
       headIndex: t.tasteHeadIndex,
@@ -390,9 +896,21 @@ export default function MusicRecommender() {
     });
   };
 
+  const buildShareUrl = () => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://musicmylove.vercel.app";
+    const tracksToShare = shareSeeds.length > 0 ? shareSeeds : importedSeeds.slice(0, 5);
+    if (tracksToShare.length === 0) return origin;
+    const query = tracksToShare
+      .slice(0, 5)
+      .map((t) => `${t.artist.replace(/[:;,]/g, " ").trim()}:${t.title.replace(/[:;,]/g, " ").trim()}`.replace(/\s+/g, "+"))
+      .join(",");
+    return `${origin}/?s=${query}`;
+  };
+
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.origin);
+      const shareUrl = buildShareUrl();
+      await navigator.clipboard.writeText(shareUrl);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch {
@@ -436,9 +954,12 @@ export default function MusicRecommender() {
             <button
               type="button"
               className="share-btn"
-              onClick={() => setIsShareModalOpen(true)}
+              disabled={!canShare}
+              onClick={() => {
+                if (canShare) setIsShareModalOpen(true);
+              }}
               aria-label={t.shareAria}
-              title={t.shareTitle}
+              title={canShare ? t.shareTitle : t.shareDisabledTooltip}
             >
               <span>↗</span>
               <span>{t.share}</span>
@@ -472,46 +993,209 @@ export default function MusicRecommender() {
 
           <div className="card-scrollable">
             <div
-              className={`tactile-disc-dropzone ${isDragging ? "dragging" : ""}`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              className={`tactile-disc-dropzone ${isDragging ? "dragging" : ""} ${loading ? "is-loading" : ""}`}
+              onClick={() => { if (!loading) fileInputRef.current?.click(); }}
+              onDragOver={(e) => { e.preventDefault(); if (!loading) setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
-              onDrop={handleDrop}
+              onDrop={(e) => { if (!loading) handleDrop(e); }}
               role="button"
               tabIndex={0}
               aria-label={t.uploadAria}
+              aria-busy={loading}
             >
               <div className="tactile-disc-inner">
-                <span>JSON</span>
+                {loading ? (
+                  <div className="disc-spinner" aria-label={t.analyzingTaste}>
+                    <span className="spinner-dot" />
+                    <span className="spinner-dot" />
+                    <span className="spinner-dot" />
+                  </div>
+                ) : (
+                  <span className={`tactile-disc-format ${isFormatFading ? "fading" : ""}`}>
+                    {SUPPORTED_FORMATS[formatIndex]}
+                  </span>
+                )}
               </div>
             </div>
 
             <div className="dropzone-container">
-              <p className="dropzone-label">{t.dropzoneLabel}</p>
-              <p className="dropzone-sublabel">{t.dropzoneSublabel}</p>
+              <p className="dropzone-label">{loading ? t.analyzingTaste : t.dropzoneLabel}</p>
+              {loading ? (
+                <div className="dropzone-fact-container">
+                  <p className={`dropzone-fact ${isFactFading ? "fading" : ""}`}>
+                    {facts[factIndex]?.isTea ? (
+                      <>
+                        {isRussian ? (
+                          <>
+                            Пока нейросеть вычисляет форму вкуса...{" "}
+                            <a
+                              href="https://pay.cloudtips.ru/p/45660cf3"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="fact-tea-link"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              угостить автора чаем ☕
+                            </a>
+                          </>
+                        ) : (
+                          <>
+                            While the AI charts your taste...{" "}
+                            <a
+                              href="https://pay.cloudtips.ru/p/45660cf3"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="fact-tea-link"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              tip the author a tea ☕
+                            </a>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      facts[factIndex]?.text ?? t.analyzingSubtitle
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <p className="dropzone-sublabel">{t.dropzoneSublabel}</p>
+              )}
             </div>
 
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,application/json"
+              accept=".json,.csv,.txt,application/json,text/csv,text/plain"
               style={{ display: "none" }}
               onChange={handleFileUpload}
               id="json-file-input"
             />
 
+            {error && (
+              <div className="import-error-banner" role="alert">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  className="import-error-dismiss"
+                  onClick={() => setError("")}
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
-              className="btn-pill"
-              onClick={() => fileInputRef.current?.click()}
+              className={`btn-pill ${loading ? "btn-pill-loading" : ""}`}
+              onClick={() => { if (!loading) fileInputRef.current?.click(); }}
+              disabled={loading}
             >
-              {t.chooseFile}
+              {loading ? t.buttonAnalyzing : t.chooseFile}
             </button>
+
+            <div className="import-help-wrapper">
+              <button
+                type="button"
+                className="import-help-btn"
+                onClick={() => setShowHelpPopover((prev) => !prev)}
+                aria-expanded={showHelpPopover}
+              >
+                <span>{t.howToGetFile}</span>
+                <span className="help-icon-circle" aria-hidden="true">i</span>
+              </button>
+
+              {showHelpPopover && (
+                <div className="import-help-popover" role="tooltip">
+                  <div className="import-help-popover-content">
+                    <p className="import-help-row">
+                      <span>{t.helpExportifyPre}</span>
+                      <a
+                        href="https://exportify.app/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="import-help-link"
+                      >
+                        exportify.app
+                      </a>
+                      <span>{t.helpExportifyPost}</span>
+                    </p>
+                    <p className="import-help-row import-help-muted">
+                      {t.helpSpotifyArchive}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="import-help-close"
+                    onClick={() => setShowHelpPopover(false)}
+                    aria-label={t.shareClose}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <form
+              className="yandex-import-box"
+              onSubmit={handleYandexImport}
+            >
+              <div className="yandex-input-wrapper">
+                <svg
+                  className="yandex-input-icon"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                </svg>
+                <input
+                  type="url"
+                  className="yandex-input"
+                  placeholder={t.yandexPlaceholder}
+                  value={yandexUrl}
+                  onChange={(e) => {
+                    setYandexUrl(e.target.value);
+                    if (yandexNotice) setYandexNotice("");
+                  }}
+                  disabled={yandexLoading}
+                  aria-label={t.yandexPlaceholder}
+                />
+                <button
+                  type="submit"
+                  className={`yandex-submit-btn ${yandexLoading ? "loading" : ""}`}
+                  disabled={!yandexUrl.trim() || yandexLoading}
+                  aria-label={t.yandexSubmit}
+                  title={t.yandexSubmit}
+                >
+                  {yandexLoading ? "…" : "→"}
+                </button>
+              </div>
+              {yandexNotice && (
+                <div className="yandex-notice" role="status">
+                  {yandexNotice}
+                </div>
+              )}
+            </form>
 
             <div className="manual-search-box">
               <div className="progress-tag">
                 <span>{t.manualSearch}</span>
-                <span>{seeds.length} / 5</span>
+                {importedSeeds.length > 0 ? (
+                  <span className="imported-count-badge">
+                    {t.importedBadge.replace("{count}", String(importedSeeds.length))}
+                  </span>
+                ) : (
+                  <span>{seeds.length} / 5</span>
+                )}
               </div>
 
               <div className="search-input-wrapper">
@@ -550,18 +1234,30 @@ export default function MusicRecommender() {
 
               {seeds.length > 0 && (
                 <div className="seed-chips">
-                  {seeds.map((s) => (
+                  {seeds.slice(0, 4).map((s) => (
                     <div key={s.mbid} className="seed-chip">
                       <span>{s.title}</span>
                       <button type="button" onClick={() => removeSeed(s.mbid)} aria-label={`${t.removeSeedAria}: ${s.title}`}>×</button>
                     </div>
                   ))}
+                  {((importedSeeds.length > 4 ? importedSeeds.length : seeds.length) > 4) && (
+                    <div
+                      className="seed-chip-more"
+                      title={
+                        importedSeeds.length > 4
+                          ? importedSeeds.slice(4).map((x) => `${x.artist} - ${x.title}`).slice(0, 10).join("\n") + (importedSeeds.length > 14 ? "\n…" : "")
+                          : seeds.slice(4).map((x) => `${x.artist} - ${x.title}`).join("\n")
+                      }
+                    >
+                      {t.moreTracksEllipsis.replace(
+                        "{count}",
+                        String((importedSeeds.length > 4 ? importedSeeds.length : seeds.length) - 4)
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-
-            {loading && <div className="loading-indicator">{t.readingTaste}</div>}
-            {error && <div className="loading-indicator" role="alert">{error}</div>}
           </div>
         </section>
 
@@ -800,15 +1496,21 @@ export default function MusicRecommender() {
                 <div className="preview-section">
                   <div className="preview-section-title">{t.shareTopSeeds}</div>
                   <div className="preview-track-list">
-                    {shareSeeds.map((s, idx) => (
-                      <div key={idx} className="preview-track-row">
-                        <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
-                        <div className="preview-track-meta">
-                          <span className="preview-track-title">{s.title}</span>
-                          <span className="preview-track-artist">{s.artist}</span>
+                    {shareSeeds.length > 0 ? (
+                      shareSeeds.map((s, idx) => (
+                        <div key={idx} className="preview-track-row">
+                          <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
+                          <div className="preview-track-meta">
+                            <span className="preview-track-title">{s.title}</span>
+                            <span className="preview-track-artist">{s.artist}</span>
+                          </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="preview-track-meta" style={{ opacity: 0.6, fontSize: "11px", padding: "4px 0" }}>
+                        {t.shareDisabledTooltip}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 
@@ -817,15 +1519,21 @@ export default function MusicRecommender() {
                 <div className="preview-section">
                   <div className="preview-section-title">{t.shareBottomRecs}</div>
                   <div className="preview-track-list">
-                    {shareRecs.map((r, idx) => (
-                      <div key={idx} className="preview-track-row">
-                        <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
-                        <div className="preview-track-meta">
-                          <span className="preview-track-title">{r.title}</span>
-                          <span className="preview-track-artist">{r.artist}</span>
+                    {shareRecs.length > 0 ? (
+                      shareRecs.map((r, idx) => (
+                        <div key={idx} className="preview-track-row">
+                          <span className="preview-track-idx">{idx + 1 < 10 ? `0${idx + 1}` : idx + 1}</span>
+                          <div className="preview-track-meta">
+                            <span className="preview-track-title">{r.title}</span>
+                            <span className="preview-track-artist">{r.artist}</span>
+                          </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="preview-track-meta" style={{ opacity: 0.6, fontSize: "11px", padding: "4px 0" }}>
+                        {t.shareDisabledTooltip}
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
 

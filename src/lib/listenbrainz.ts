@@ -75,7 +75,13 @@ export async function searchRecordings(query: string, signal?: AbortSignal) {
   return rankSearchResults(query, tracks);
 }
 /** Searches ListenBrainz with the same artist/title query used by TasteLift seed resolution. */
-export async function searchRecordingsForSeed(query: string, signal?: AbortSignal) { return searchRecordings(query, signal); }
+export async function searchRecordingsForSeed(query: string, signal?: AbortSignal): Promise<Track[]> {
+  try {
+    return await searchRecordings(query, signal);
+  } catch {
+    return [];
+  }
+}
 export async function fetchSimilar(mbid: string, signal?: AbortSignal) { return parseSimilar(await json(`${LABS}/similar-recordings/json?recording_mbids=${encodeURIComponent(mbid)}&algorithm=${encodeURIComponent(SIMILARITY_ALGORITHM)}`, signal)); }
 /** Parses the Labs batched similarity response while keeping upstream rank order per reference MBID. */
 export function parseSimilarBatch(value: unknown): Record<string, SimilarTrack[]> {

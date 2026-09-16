@@ -76,3 +76,81 @@ test("reduces histories larger than the serving bound to their 500 strongest dis
   expect(parsed[0]).toEqual({ artist: "Artist 500", title: "Song 500" });
   expect(parsed.some((track) => track.artist === "Artist 0")).toBe(false);
 });
+
+test("accepts Exportify CSV format with track ids and artist names", () => {
+  const csv = `Spotify Track Id,Track Name,Artist Name(s),Album Name,Release Date
+4uLU6hMCjMI75M1A2tKUQC,Never Gonna Give You Up,Rick Astley,Whenever You Need Somebody,1987-11-12
+0VjIjW4GlUZAMYd2vXMi3b,Blinding Lights,The Weeknd,After Hours,2020-03-20
+60bd9d53-01ff-4562-8058,Everything in Its Right Place,Radiohead,Kid A,2000-10-02
+5566d65b-2089-4cf5-9766,"Hyper-ballad, Remix",Björk,Post,1995-06-13
+8a49dba0-253a-4535-b87f,Roads,Portishead,Dummy,1994-08-22
+f3bba4cd-8018-468b-902e,Teardrop,Massive Attack,Mezzanine,1998-04-20`;
+
+  const parsed = parseTasteInput(csv);
+  expect(parsed).toHaveLength(6);
+  expect(parsed[0].artist).toBe("Rick Astley");
+  expect(parsed[0].title).toBe("Never Gonna Give You Up");
+  expect(parsed[0].spotifyUrl).toBe("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC");
+  expect(parsed[0].spotifyId).toBe("4uLU6hMCjMI75M1A2tKUQC");
+  expect(parsed[3].title).toBe("Hyper-ballad, Remix");
+});
+
+test("accepts Exportify JSON array format with Track Name and Artist Name(s)", () => {
+  const json = [
+    { "Spotify Track Id": "4uLU6hMCjMI75M1A2tKUQC", "Track Name": "Never Gonna Give You Up", "Artist Name(s)": "Rick Astley" },
+    { "Spotify Track Id": "0VjIjW4GlUZAMYd2vXMi3b", "Track Name": "Blinding Lights", "Artist Name(s)": "The Weeknd" },
+    { "Track Name": "Roads", "Artist Name(s)": "Portishead" },
+    { "Track Name": "Everything in Its Right Place", "Artist Name(s)": "Radiohead" },
+    { "Track Name": "Hyper-Ballad", "Artist Name(s)": "Björk" },
+  ];
+  const parsed = parseTasteInput(json);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({
+    artist: "Rick Astley",
+    title: "Never Gonna Give You Up",
+    spotifyUrl: "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC",
+    spotifyId: "4uLU6hMCjMI75M1A2tKUQC",
+  });
+});
+
+test("accepts Spotify playlist JSON with tracks.items hierarchy", () => {
+  const playlist = {
+    name: "Indie Mix",
+    tracks: {
+      items: [
+        { track: { name: "Roads", artists: [{ name: "Portishead" }], id: "4uLU6hMCjMI75M1A2tKUQC" } },
+        { track: { name: "Teardrop", artists: [{ name: "Massive Attack" }] } },
+        { track: { name: "Idioteque", artists: [{ name: "Radiohead" }] } },
+        { track: { name: "Army of Me", artists: [{ name: "Björk" }] } },
+        { track: { name: "Midnight City", artists: [{ name: "M83" }] } },
+      ],
+    },
+  };
+  const parsed = parseTasteInput(playlist);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0].artist).toBe("Portishead");
+  expect(parsed[0].title).toBe("Roads");
+  expect(parsed[0].spotifyId).toBe("4uLU6hMCjMI75M1A2tKUQC");
+});
+
+test("accepts plain text tracklist with Artist - Title lines", () => {
+  const text = `Portishead - Roads
+Massive Attack — Teardrop
+Radiohead - Everything in Its Right Place
+Björk - Hyperballad
+M83 - Midnight City`;
+
+  const parsed = parseTasteInput(text);
+  expect(parsed).toHaveLength(5);
+  expect(parsed[0]).toEqual({ artist: "Portishead", title: "Roads" });
+  expect(parsed[1]).toEqual({ artist: "Massive Attack", title: "Teardrop" });
+});
+
+test("supports allowPartial option for 1-4 tracks without error", () => {
+  const shortText = `Portishead - Roads\nMassive Attack - Teardrop`;
+  const parsed = parseTasteInput(shortText, { allowPartial: true });
+  expect(parsed).toHaveLength(2);
+  expect(parsed[0].artist).toBe("Portishead");
+  expect(parsed[1].artist).toBe("Massive Attack");
+});
+

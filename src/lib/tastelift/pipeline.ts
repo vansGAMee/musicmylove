@@ -3,6 +3,7 @@ import modelJson from "../../../ml/tastelift-model.json";
 import { createTasteLiftSlate } from "../recommend";
 import type { RankedTrack } from "../types";
 import { expandTasteCandidatePool, type TasteLiftCatalogArtifact } from "./catalog";
+import { recordingIdentity } from "./identity";
 import { TasteLiftModel, type TasteLiftArtifact } from "./model";
 import { createTasteRetrievalAdapters, retrieveTasteCandidates, type TasteRetrievalAdapters } from "./retrieval";
 import type { ResolvedTasteSeed } from "./resolver";
@@ -26,5 +27,32 @@ export async function recommendTasteSeeds(seeds: readonly ResolvedTasteSeed[], o
   const candidateLimit = options.candidateLimit ?? 500;
   const external = await retrieveTasteCandidates(seeds, options.retrievalAdapters ?? createTasteRetrievalAdapters(), candidateLimit);
   const expanded = expandTasteCandidatePool(external, options.catalog ?? catalogJson as TasteLiftCatalogArtifact, model, candidateLimit);
-  return { candidateCount: expanded.candidates.length, recommendations: createTasteLiftSlate(expanded, options.slateLimit ?? 40) };
+
+  // Guarantee that no song already in the user's playlist/seeds is ever recommended
+  const excludedMbids = new Set<string>();
+  const excludedIdentities = new Set<string>();
+  for (const s of seeds) {
+    if ("track" in s && s.track?.mbid) {
+      excludedMbids.add(s.track.mbid);
+      excludedIdentities.add(recordingIdentity(s.track));
+    }
+    if (s.input?.artist && s.input?.title) {
+      excludedIdentities.add(recordingIdentity({ artist: s.input.artist, title: s.input.title }));
+    }
+  }
+
+  const filteredExpanded = {
+    ...expanded,
+    candidates: expanded.candidates.filter((c) => {
+      if (excludedMbids.has(c.mbid)) return false;
+      if (c.alternateMbids?.some((id) => excludedMbids.has(id))) return false;
+      if (excludedIdentities.has(recordingIdentity(c))) return false;
+      return true;
+    }),
+  };
+
+  const rawSlate = createTasteLiftSlate(filteredExpanded, options.slateLimit ?? 40);
+  const recommendations = rawSlate.filter((r) => !excludedMbids.has(r.mbid) && !excludedIdentities.has(recordingIdentity(r)));
+
+  return { candidateCount: filteredExpanded.candidates.length, recommendations };
 }
