@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { fetchYandexPlaylist, YandexPlaylistError } from "../../../../src/lib/yandex/playlist";
 import { yandexRateLimiter, getClientIp } from "../../../../src/lib/rate-limit";
 
-// Vercel Serverless maximum execution limit on Hobby plan
-export const maxDuration = 10;
+// Vercel Serverless maximum execution limit (up to 60s supported)
+export const maxDuration = 60;
 
 async function processYandexPlaylist(url: string, isGet: boolean) {
   try {

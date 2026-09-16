@@ -652,10 +652,10 @@ export async function fetchYandexPlaylist(
   rawUrl: string,
   options: YandexFetchOptions = {}
 ): Promise<YandexPlaylistResult> {
-  const timeoutMs = options.timeoutMs ?? 3500;
-  const retries = options.retries ?? 2;
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const retries = options.retries ?? 1;
   const fetcher = options.fetcher ?? fetch;
-  const deadline = Date.now() + 7500;
+  const deadline = Date.now() + 10000;
 
   const normalized = normalizeYandexPlaylistUrl(rawUrl);
 
@@ -708,6 +708,9 @@ export async function fetchYandexPlaylist(
       );
 
       const text = await response.text();
+      if (text.includes("недоступна в вашем регионе") || text.includes("Unavailable For Legal Reasons") || text.includes("BlockPage")) {
+        throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+      }
       if (text.startsWith("{")) {
         handlersSucceeded = true;
         const data = JSON.parse(text) as {
@@ -766,6 +769,9 @@ export async function fetchYandexPlaylist(
         );
 
         const text = await response.text();
+        if (text.includes("Unavailable For Legal Reasons") || text.includes("недоступна в вашем регионе") || text.includes("BlockPage")) {
+          throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+        }
         if (text.startsWith("{")) {
           const data = JSON.parse(text) as {
             result?: {
@@ -829,6 +835,9 @@ export async function fetchYandexPlaylist(
   );
 
   const html = await htmlResponse.text();
+  if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons") || html.includes("BlockPage")) {
+    throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+  }
   const extracted = extractFromHtmlState(html);
 
   // If HTML revealed owner & kind that we didn't have before, try API one more time

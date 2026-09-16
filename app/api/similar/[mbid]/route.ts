@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchSimilar } from "@/src/lib/listenbrainz";
 
-export const maxDuration = 10;
+export const maxDuration = 60;
 
 export async function GET(_: Request, context: { params: Promise<{ mbid: string }> }) {
   try {

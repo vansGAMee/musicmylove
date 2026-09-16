@@ -459,7 +459,8 @@ export default function MusicRecommender() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(bodyToSend),
       });
-      const payload = (await response.json()) as {
+
+      let payload: {
         error?: string;
         recommendations?: TasteLiftApiRecommendation[];
         seeds?: Array<{
@@ -470,9 +471,19 @@ export default function MusicRecommender() {
           input?: { artist: string; title: string };
           track?: { mbid?: string; artist: string; title: string; release?: string };
         }>;
-      };
-      if (!response.ok || !payload.recommendations) {
-        throw new Error(payload.error ?? t.errorRecommendationFailed);
+      } | null = null;
+
+      try {
+        const text = await response.text();
+        if (text && (text.startsWith("{") || text.startsWith("["))) {
+          payload = JSON.parse(text);
+        }
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !payload || !payload.recommendations) {
+        throw new Error(payload?.error ?? t.errorRecommendationFailed);
       }
       if (payload.seeds && payload.seeds.length > 0) {
         const resolvedSeeds: SeedTrack[] = payload.seeds.slice(0, 5).map((s, idx) => {
@@ -491,7 +502,7 @@ export default function MusicRecommender() {
         setImportedSeeds((prev) =>
           prev.length > 0
             ? prev
-            : payload.seeds!.map((s) => ({
+            : payload!.seeds!.map((s) => ({
                 artist: s.track?.artist ?? s.input?.artist ?? s.artist ?? "",
                 title: s.track?.title ?? s.input?.title ?? s.title ?? "",
               }))
@@ -517,7 +528,12 @@ export default function MusicRecommender() {
         setActiveScreen("playlist");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t.errorRecommendationFailed);
+      const msg = cause instanceof Error ? cause.message : "";
+      if (!msg || /token|json|syntaxerror/i.test(msg)) {
+        setError(t.errorRecommendationFailed);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -608,7 +624,7 @@ export default function MusicRecommender() {
 
       if (parsedSongs.length >= 5) {
         await requestRecommendations({
-          songs: parsedSongs.slice(0, 500).map((s) => ({
+          songs: parsedSongs.slice(0, 50).map((s) => ({
             artist: s.artist,
             title: s.title,
             ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
@@ -671,6 +687,22 @@ export default function MusicRecommender() {
     })();
   };
 
+  useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable) return;
+      if (loading) return;
+      const text = e.clipboardData?.getData("text");
+      if (text && text.trim().length > 3) {
+        if (text.includes("\n") || text.includes(" - ") || text.includes(" — ")) {
+          void handleUploadedContent(text);
+        }
+      }
+    };
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => window.removeEventListener("paste", handleGlobalPaste);
+  }, [loading]);
+
   const handleYandexImport = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUrl = yandexUrl.trim();
@@ -681,29 +713,52 @@ export default function MusicRecommender() {
     setError("");
 
     try {
-      // Use GET first to leverage Vercel Edge CDN cache (0 serverless function executions on repeat requests)
-      let res = await fetch(`/api/yandex/playlist?url=${encodeURIComponent(cleanUrl)}`, {
-        method: "GET",
-        headers: { "Accept": "application/json" },
-      });
-
-      if (!res.ok && res.status !== 429 && res.status !== 404 && res.status !== 403 && res.status !== 451) {
-        // Fallback to POST if GET fails
-        res = await fetch("/api/yandex/playlist", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: cleanUrl }),
+      let res: Response;
+      try {
+        // Use GET first to leverage Vercel Edge CDN cache (0 serverless function executions on repeat requests)
+        res = await fetch(`/api/yandex/playlist?url=${encodeURIComponent(cleanUrl)}`, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
         });
+
+        if (!res.ok && res.status === 405) {
+          // Fallback to POST only if GET method is not allowed
+          res = await fetch("/api/yandex/playlist", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify({ url: cleanUrl }),
+          });
+        }
+      } catch {
+        setYandexNotice(t.yandexGeoBlocked);
+        return;
       }
 
-      const data = await res.json();
-      if (!res.ok) {
-        let msg = data.error ?? t.errorRecommendationFailed;
-        if (data.code === "rate_limited" || res.status === 429) msg = t.yandexRateLimited;
-        else if (data.code === "geo_blocked" || res.status === 451) msg = t.yandexGeoBlocked;
-        else if (data.code === "not_found") msg = t.yandexNotFound;
-        else if (data.code === "private") msg = t.yandexPrivate;
-        else if (data.code === "invalid_url") msg = t.yandexInvalidUrl;
+      let data: {
+        ok?: boolean;
+        error?: string;
+        code?: string;
+        tracks?: Array<{ id: string; title: string; artists: string[] }>;
+        playlist?: { tracks?: Array<{ id: string; title: string; artists: string[] }> };
+      } | null = null;
+
+      try {
+        const text = await res.text();
+        if (text && (text.startsWith("{") || text.startsWith("["))) {
+          data = JSON.parse(text);
+        }
+      } catch {
+        data = null;
+      }
+
+      if (!res.ok || !data || !data.ok) {
+        let msg = data?.error ?? t.yandexGeoBlocked;
+        const code = data?.code;
+        if (code === "rate_limited" || res.status === 429) msg = t.yandexRateLimited;
+        else if (code === "geo_blocked" || res.status === 451 || res.status >= 500 || !data) msg = t.yandexGeoBlocked;
+        else if (code === "not_found" || res.status === 404) msg = t.yandexNotFound;
+        else if (code === "private" || res.status === 403) msg = t.yandexPrivate;
+        else if (code === "invalid_url" || res.status === 400) msg = t.yandexInvalidUrl;
         setYandexNotice(msg);
         return;
       }
@@ -735,13 +790,18 @@ export default function MusicRecommender() {
       setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
 
       await requestRecommendations({
-        songs: parsedSongs.slice(0, 500).map((s) => ({
+        songs: parsedSongs.slice(0, 50).map((s) => ({
           artist: s.artist,
           title: s.title,
         })),
       });
     } catch (err) {
-      setYandexNotice(err instanceof Error ? err.message : t.errorRecommendationFailed);
+      const msg = err instanceof Error ? err.message : "";
+      if (!msg || /token|json|syntaxerror|fetch/i.test(msg)) {
+        setYandexNotice(t.yandexGeoBlocked);
+      } else {
+        setYandexNotice(msg);
+      }
     } finally {
       setYandexLoading(false);
     }
@@ -1040,6 +1100,14 @@ export default function MusicRecommender() {
               onDragOver={(e) => { e.preventDefault(); if (!loading) setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={(e) => { if (!loading) handleDrop(e); }}
+              onPaste={(e) => {
+                if (loading) return;
+                const pasted = e.clipboardData?.getData("text");
+                if (pasted && pasted.trim()) {
+                  e.preventDefault();
+                  void handleUploadedContent(pasted);
+                }
+              }}
               role="button"
               tabIndex={0}
               aria-label={t.uploadAria}

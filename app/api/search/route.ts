@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { searchRecordings } from "@/src/lib/listenbrainz";
 import { searchRateLimiter, getClientIp } from "@/src/lib/rate-limit";
 
-export const maxDuration = 10;
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const rateLimit = searchRateLimiter.check(getClientIp(request));

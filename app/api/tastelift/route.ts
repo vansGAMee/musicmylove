@@ -5,8 +5,8 @@ import { recommendTasteSeeds } from "../../../src/lib/tastelift/pipeline";
 import { spotifySearch } from "../../../src/lib/listenbrainz";
 import { tasteliftRateLimiter, getClientIp } from "../../../src/lib/rate-limit";
 
-// Vercel Serverless maximum execution limit on Hobby plan
-export const maxDuration = 10;
+// Vercel Serverless maximum execution limit (up to 60s supported)
+export const maxDuration = 60;
 
 interface TasteLiftRouteDependencies {
   parseTasteInput?: typeof parseTasteInput;
