@@ -29,6 +29,7 @@ async function processYandexPlaylist(url: string, isGet: boolean) {
         not_found: 404,
         private: 403,
         upstream_error: 502,
+        geo_blocked: 451,
       };
       return NextResponse.json(
         { ok: false, error: error.message, code: error.code },

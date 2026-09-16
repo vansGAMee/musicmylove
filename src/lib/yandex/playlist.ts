@@ -12,7 +12,7 @@ export interface YandexPlaylistResult {
   tracks: YandexTrack[];
 }
 
-export type YandexErrorCode = "invalid_url" | "not_found" | "private" | "upstream_error";
+export type YandexErrorCode = "invalid_url" | "not_found" | "private" | "upstream_error" | "geo_blocked";
 
 export class YandexPlaylistError extends Error {
   constructor(public readonly code: YandexErrorCode, message: string) {
@@ -193,6 +193,9 @@ async function fetchWithBackoff(
 
       if (response.status === 404) {
         throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
+      }
+      if (response.status === 451) {
+        throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку).");
       }
       if (response.status === 401 || response.status === 403) {
         throw new YandexPlaylistError("private", "Плейлист приватный или доступ ограничен. Сделайте его публичным в настройках.");
@@ -399,8 +402,16 @@ export function extractFromHtmlState(html: string): {
   title?: string;
   tracks: YandexTrack[];
 } {
-  if (html.includes("404: This page could not be found") || html.includes("notFound")) {
+  // Detect actual 404 pages - be specific to avoid matching Next.js framework strings like "notFound" in RSC routing
+  if (html.includes("404: This page could not be found") ||
+      html.includes("Страница не найдена") ||
+      />\s*404\s*</.test(html)) {
     throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
+  }
+
+  // Detect geo-block pages
+  if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons")) {
+    throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку).");
   }
 
   let owner: string | undefined;
@@ -586,7 +597,7 @@ export async function fetchYandexPlaylist(
         }
       }
     } catch (e) {
-      if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found")) {
+      if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found" || e.code === "geo_blocked")) {
         throw e;
       }
       // Fall through to page inspection
@@ -646,7 +657,7 @@ export async function fetchYandexPlaylist(
         }
       }
     } catch (e) {
-      if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found")) {
+      if (e instanceof YandexPlaylistError && (e.code === "private" || e.code === "not_found" || e.code === "geo_blocked")) {
         throw e;
       }
       // Fall through to page inspection
@@ -687,13 +698,22 @@ export async function fetchYandexPlaylist(
   }
 
   if (extracted.tracks.length === 0) {
-    // If no tracks extracted and page has not-found indicators
-    if (html.includes("404") || html.includes("notFound")) {
+    // Detect geo-block in page content
+    if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons")) {
+      throw new YandexPlaylistError(
+        "geo_blocked",
+        "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку)."
+      );
+    }
+    // Detect actual 404 - avoid matching Next.js framework "notFound" strings
+    if (html.includes("404: This page could not be found") ||
+        html.includes("Страница не найдена") ||
+        />\s*404\s*</.test(html)) {
       throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
     }
     throw new YandexPlaylistError(
       "upstream_error",
-      "Не удалось извлечь треки из плейлиста. Убедитесь, что плейлист публичный и содержит треки."
+      "Не удалось извлечь треки из плейлиста. Убедитесь, что плейлист публичный и содержит треки, или вставьте треки вручную."
     );
   }
 
