@@ -251,7 +251,6 @@ export default function MusicRecommender() {
   const [yandexUrl, setYandexUrl] = useState("");
   const [yandexNotice, setYandexNotice] = useState("");
   const [yandexLoading, setYandexLoading] = useState(false);
-  const [yandexIframeUrl, setYandexIframeUrl] = useState<string | null>(null);
   const [factIndex, setFactIndex] = useState(0);
   const [isFactFading, setIsFactFading] = useState(false);
   const facts = isRussian ? MUSIC_FACTS_RU : MUSIC_FACTS_EN;
@@ -304,50 +303,6 @@ export default function MusicRecommender() {
     }, 4500);
     return () => clearTimeout(timer);
   }, [yandexNotice]);
-
-  useEffect(() => {
-    const handleYandexMessage = (event: MessageEvent) => {
-      if (typeof event.origin === "string" && !event.origin.includes("yandex.")) return;
-      try {
-        const data = event.data;
-        if (!data || typeof data !== "object") return;
-        const payload = (data as { payload?: Record<string, unknown> }).payload ?? data;
-        const rawTrack = (payload as Record<string, unknown>).currentTrack ?? (payload as Record<string, unknown>).track;
-        if (rawTrack && typeof rawTrack === "object") {
-          const tObj = rawTrack as Record<string, unknown>;
-          const title = String(tObj.title ?? tObj.name ?? "").trim();
-          let artist = "";
-          if (Array.isArray(tObj.artists)) {
-            artist = tObj.artists
-              .map((a: unknown) => (typeof a === "object" && a !== null && "name" in a ? String((a as { name?: string }).name) : String(a)))
-              .filter(Boolean)
-              .join(", ");
-          } else if (typeof tObj.artist === "string") {
-            artist = tObj.artist;
-          }
-          if (title) {
-            const finalArtist = artist || "Unknown Artist";
-            setImportedSeeds((prev) => {
-              const exists = prev.some((s) => s.title.toLowerCase() === title.toLowerCase() && s.artist.toLowerCase() === finalArtist.toLowerCase());
-              if (exists) return prev;
-              const next = [...prev, { title, artist: finalArtist }];
-              setSeeds(next.slice(0, 5).map((s, idx) => ({
-                mbid: `seed-ym-${idx}-${Date.now()}`,
-                title: s.title,
-                artist: s.artist,
-                score: 100,
-                features: [],
-                pickedFrom: [],
-              })));
-              return next;
-            });
-          }
-        }
-      } catch {}
-    };
-    window.addEventListener("message", handleYandexMessage);
-    return () => window.removeEventListener("message", handleYandexMessage);
-  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -473,11 +428,12 @@ export default function MusicRecommender() {
       // Automatically incorporate user favorites ("like") into taste seed songs
       let bodyToSend = payloadBody;
       const likedMbids = Object.keys(feedback).filter((id) => feedback[id] === "like");
-      if (likedMbids.length > 0 && typeof payloadBody === "object" && payloadBody !== null) {
+      if (typeof payloadBody === "object" && payloadBody !== null) {
         const bodyObj = payloadBody as { songs?: Array<{ artist: string; title: string; spotify_url?: string }> };
         if (Array.isArray(bodyObj.songs)) {
+          const baseSongs = bodyObj.songs.slice(0, 5);
           const existingKeys = new Set(
-            bodyObj.songs.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`)
+            baseSongs.map((s) => `${s.artist.toLowerCase()}:::${s.title.toLowerCase()}`)
           );
           const extraLikedSongs: Array<{ artist: string; title: string }> = [];
           for (const mbid of likedMbids) {
@@ -490,12 +446,10 @@ export default function MusicRecommender() {
               }
             }
           }
-          if (extraLikedSongs.length > 0) {
-            bodyToSend = {
-              ...bodyObj,
-              songs: [...bodyObj.songs, ...extraLikedSongs].slice(0, 500),
-            };
-          }
+          bodyToSend = {
+            ...bodyObj,
+            songs: [...baseSongs, ...extraLikedSongs].slice(0, 10),
+          };
         }
       }
 
@@ -636,10 +590,10 @@ export default function MusicRecommender() {
     setSearchResults([]);
     if (next.length === 5 || (importedSeeds.length > 0 && next.length > seeds.length)) {
       const allSongs = [
-        ...importedSeeds,
         ...next.map((seed) => ({ artist: seed.artist, title: seed.title })),
+        ...importedSeeds,
       ];
-      await requestRecommendations({ songs: allSongs.slice(0, 500) });
+      await requestRecommendations({ songs: allSongs.slice(0, 5) });
     }
   };
 
@@ -669,7 +623,7 @@ export default function MusicRecommender() {
 
       if (parsedSongs.length >= 5) {
         await requestRecommendations({
-          songs: parsedSongs.slice(0, 50).map((s) => ({
+          songs: parsedSongs.slice(0, 5).map((s) => ({
             artist: s.artist,
             title: s.title,
             ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
@@ -685,26 +639,41 @@ export default function MusicRecommender() {
 
   const readUploadedFileAsText = async (file: File): Promise<string> => {
     try {
-      const buffer = await file.arrayBuffer();
-      const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
-      const text = utf8Decoder.decode(buffer);
-      const replacementCount = (text.match(/\uFFFD/gu) || []).length;
-      if (replacementCount > 0) {
-        try {
-          const cp1251Decoder = new TextDecoder("windows-1251");
-          const cp1251Text = cp1251Decoder.decode(buffer);
-          const cp1251Replacements = (cp1251Text.match(/\uFFFD/gu) || []).length;
-          if (cp1251Replacements < replacementCount) {
-            return cp1251Text;
+      if (typeof file.arrayBuffer === "function") {
+        const buffer = await file.arrayBuffer();
+        const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+        const text = utf8Decoder.decode(buffer);
+        const replacementCount = (text.match(/\uFFFD/gu) || []).length;
+        if (replacementCount > 0) {
+          try {
+            const cp1251Decoder = new TextDecoder("windows-1251");
+            const cp1251Text = cp1251Decoder.decode(buffer);
+            const cp1251Replacements = (cp1251Text.match(/\uFFFD/gu) || []).length;
+            if (cp1251Replacements < replacementCount) {
+              return cp1251Text;
+            }
+          } catch {
+            // Keep UTF-8 text
           }
-        } catch {
-          // Keep UTF-8 text
         }
+        return text;
       }
-      return text;
     } catch {
-      return await file.text();
+      // Fall through to text() or FileReader
     }
+    try {
+      if (typeof file.text === "function") {
+        return await file.text();
+      }
+    } catch {
+      // Fall through to FileReader
+    }
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+      reader.readAsText(file);
+    });
   };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -802,11 +771,6 @@ export default function MusicRecommender() {
         if (code === "rate_limited" || res.status === 429) msg = t.yandexRateLimited;
         else if (code === "geo_blocked" || res.status === 451 || res.status >= 500 || !data) {
           msg = t.yandexGeoBlocked;
-          const fallbackIframe = (data as { iframeUrl?: string })?.iframeUrl ?? (() => {
-            const uuidMatch = /\/playlists\/([A-Za-z0-9._-]+)/i.exec(cleanUrl);
-            return uuidMatch ? `https://music.yandex.ru/iframe/playlist/${uuidMatch[1]}` : null;
-          })();
-          if (fallbackIframe) setYandexIframeUrl(fallbackIframe);
         }
         else if (code === "not_found" || res.status === 404) msg = t.yandexNotFound;
         else if (code === "private" || res.status === 403) msg = t.yandexPrivate;
@@ -814,8 +778,6 @@ export default function MusicRecommender() {
         setYandexNotice(msg);
         return;
       }
-
-      setYandexIframeUrl(null);
 
       const tracksList: Array<{ id: string; title: string; artists: string[] }> =
         Array.isArray(data.tracks) ? data.tracks : (data.playlist?.tracks ?? []);
@@ -844,7 +806,7 @@ export default function MusicRecommender() {
       setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
 
       await requestRecommendations({
-        songs: parsedSongs.slice(0, 50).map((s) => ({
+        songs: parsedSongs.slice(0, 5).map((s) => ({
           artist: s.artist,
           title: s.title,
         })),
@@ -853,8 +815,6 @@ export default function MusicRecommender() {
       const msg = err instanceof Error ? err.message : "";
       if (!msg || /token|json|syntaxerror|fetch/i.test(msg)) {
         setYandexNotice(t.yandexGeoBlocked);
-        const uuidMatch = /\/playlists\/([A-Za-z0-9._-]+)/i.exec(cleanUrl);
-        if (uuidMatch) setYandexIframeUrl(`https://music.yandex.ru/iframe/playlist/${uuidMatch[1]}`);
       } else {
         setYandexNotice(msg);
       }
@@ -1348,62 +1308,6 @@ export default function MusicRecommender() {
               {yandexNotice && (
                 <div className="yandex-notice" role="status">
                   {yandexNotice}
-                </div>
-              )}
-              {yandexIframeUrl && (
-                <div
-                  className="yandex-iframe-wrapper"
-                  style={{
-                    marginTop: "12px",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                    border: "1px solid rgba(255, 255, 255, 0.12)",
-                    background: "rgba(0, 0, 0, 0.4)",
-                  }}
-                >
-                  <iframe
-                    src={yandexIframeUrl}
-                    width="100%"
-                    height="320"
-                    frameBorder="0"
-                    style={{ display: "block", border: "none", width: "100%", height: "320px", background: "#18181b" }}
-                    title="Yandex Music Player"
-                    allow="autoplay"
-                  />
-                  <div
-                    style={{
-                      padding: "10px 14px",
-                      background: "rgba(255, 255, 255, 0.04)",
-                      fontSize: "0.82rem",
-                      opacity: 0.9,
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <span>
-                      {isRussian
-                        ? "Плейлист открыт в плеере. При воспроизведении треки добавляются автоматически, или скопируйте список треков и вставьте (Ctrl+V)."
-                        : "Playlist opened in player. Tracks add automatically as they play, or copy & paste tracklist (Ctrl+V)."}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setYandexIframeUrl(null)}
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "inherit",
-                        cursor: "pointer",
-                        fontSize: "1.2rem",
-                        padding: "0 6px",
-                      }}
-                      title={isRussian ? "Закрыть плеер" : "Close player"}
-                      aria-label={isRussian ? "Закрыть плеер" : "Close player"}
-                    >
-                      ×
-                    </button>
-                  </div>
                 </div>
               )}
             </form>

@@ -27,16 +27,10 @@ async function processYandexPlaylist(url: string, isGet: boolean) {
       { headers }
     );
   } catch (error) {
-    let iframeUrl: string | undefined;
     let playlistUuid: string | undefined;
     try {
       const norm = normalizeYandexPlaylistUrl(url);
       playlistUuid = norm.uuid;
-      if (norm.uuid) {
-        iframeUrl = `https://music.yandex.ru/iframe/playlist/${norm.uuid}`;
-      } else if (norm.owner && norm.kind) {
-        iframeUrl = `https://music.yandex.ru/iframe/playlist/${encodeURIComponent(norm.owner)}/${norm.kind}`;
-      }
     } catch {}
 
     if (error instanceof YandexPlaylistError) {
@@ -52,7 +46,6 @@ async function processYandexPlaylist(url: string, isGet: boolean) {
           ok: false,
           error: error.message,
           code: error.code,
-          iframeUrl,
           playlistUuid,
         },
         { status: statusMap[error.code] ?? 500 }
