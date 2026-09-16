@@ -304,7 +304,94 @@ function deduplicateTracks(tracks: YandexTrack[]): YandexTrack[] {
 }
 
 /**
+ * ROBUST: Try to extract JSON objects from script tags by parsing valid JSON chunks
+ */
+function extractJsonFromScripts(html: string): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+  
+  // Find all script tags
+  const scriptRegex = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  
+  while ((match = scriptRegex.exec(html)) !== null) {
+    const scriptContent = match[1];
+    if (!scriptContent) continue;
+    
+    // Remove common non-JSON wrappers like self.__next_f.push([...])
+    const cleaned = scriptContent
+      .replace(/^self\.__next_f\.push\(\[/, '')
+      .replace(/\]\);?$/, '')
+      .trim();
+    
+    // Try to parse as JSON
+    try {
+      const json = JSON.parse(cleaned);
+      if (typeof json === "object" && json !== null) {
+        results.push(json as Record<string, unknown>);
+      }
+    } catch {
+      // Try to find JSON-like objects within the script
+      const jsonMatches = cleaned.matchAll(/\{[^{}]*?"(?:title|name|artists|tracks)"\s*:\s*[^{}]*\}/g);
+      for (const jsonMatch of jsonMatches) {
+        try {
+          const partialJson = JSON.parse(jsonMatch[0]);
+          if (typeof partialJson === "object" && partialJson !== null) {
+            results.push(partialJson as Record<string, unknown>);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  
+  return results;
+}
+
+/**
+ * ROBUST: Extract tracks from any object structure recursively
+ */
+function extractTracksFromAny(obj: unknown, maxDepth: number = 10): YandexTrack[] {
+  if (maxDepth === 0) return [];
+  
+  const tracks: YandexTrack[] = [];
+  
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const parsed = parseRawTrack(item);
+      if (parsed) {
+        tracks.push(parsed);
+      } else {
+        tracks.push(...extractTracksFromAny(item, maxDepth - 1));
+      }
+    }
+  } else if (typeof obj === "object" && obj !== null) {
+    const record = obj as Record<string, unknown>;
+    
+    // Check for explicit tracks array
+    if (Array.isArray(record.tracks)) {
+      tracks.push(...extractTracksFromAny(record.tracks, maxDepth));
+    }
+    
+    // Check for playlist object
+    if (Array.isArray(record.playlist)) {
+      tracks.push(...extractTracksFromAny(record.playlist, maxDepth));
+    }
+    
+    // Recursively search nested objects
+    for (const value of Object.values(record)) {
+      if (typeof value === "object" && value !== null) {
+        tracks.push(...extractTracksFromAny(value, maxDepth - 1));
+      }
+    }
+  }
+  
+  return tracks;
+}
+
+/**
  * Extracts metadata and tracks from Next.js server-rendered HTML or embedded state.
+ * Uses multiple fallback strategies to handle various Yandex HTML structures.
  */
 export function extractFromHtmlState(html: string): {
   owner?: string;
@@ -360,16 +447,41 @@ export function extractFromHtmlState(html: string): {
     }
   }
 
-  // 4. Try extracting tracks from self.__next_f.push streams or state patches
-  const trackMatches = html.matchAll(/"title"\s*:\s*"([^"]+)"\s*,\s*"artists"\s*:\s*\[\{"name"\s*:\s*"([^"]+)"/g);
-  for (const m of trackMatches) {
-    const trackTitle = m[1]!.replace(/\\"/g, '"');
-    const artistName = m[2]!.replace(/\\"/g, '"');
-    tracks.push({
-      id: `${artistName} - ${trackTitle}`,
-      title: trackTitle,
-      artists: [artistName],
-    });
+  // 4. NEW: Extract and parse all JSON from script tags
+  if (tracks.length === 0) {
+    try {
+      const jsonObjects = extractJsonFromScripts(html);
+      for (const obj of jsonObjects) {
+        const extracted = extractTracksFromAny(obj, 8);
+        tracks.push(...extracted);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 5. Fallback: Old regex-based extraction for simple patterns (with improvements)
+  if (tracks.length === 0) {
+    const trackMatches = html.matchAll(/"title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*"artists"\s*:\s*\[/g);
+    for (const m of trackMatches) {
+      const trackTitle = m[1]!.replace(/\\"/g, '"').trim();
+      if (trackTitle) {
+        // Try to find the artist name in nearby content
+        const idx = html.indexOf(m[0]!) + m[0]!.length;
+        const snippet = html.substring(idx, Math.min(idx + 300, html.length));
+        const artistMatch = /"name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i.exec(snippet);
+        if (artistMatch) {
+          const artistName = artistMatch[1]!.replace(/\\"/g, '"').trim();
+          if (artistName) {
+            tracks.push({
+              id: `${artistName} - ${trackTitle}`,
+              title: trackTitle,
+              artists: [artistName],
+            });
+          }
+        }
+      }
+    }
   }
 
   return { owner, kind, title, tracks: deduplicateTracks(tracks) };
