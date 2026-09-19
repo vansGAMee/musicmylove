@@ -1,6 +1,6 @@
 import modelArtifact from "../../ml/tastelift-model.json";
 import { describe, expect, test } from "vitest";
-import { retrieveTasteCatalogCandidates, retrieveTasteHistoryCandidates, type TasteLiftCatalogArtifact } from "../../src/lib/tastelift/catalog";
+import { mergeTasteCandidateSources, retrieveTasteCatalogCandidates, retrieveTasteHistoryCandidates, type TasteLiftCatalogArtifact } from "../../src/lib/tastelift/catalog";
 import { TasteLiftModel, type TasteLiftArtifact, type TasteLiftTrack } from "../../src/lib/tastelift/model";
 import { recommendTasteSeeds } from "../../src/lib/tastelift/pipeline";
 import type { ResolvedTasteSeed } from "../../src/lib/tastelift/resolver";
@@ -85,5 +85,25 @@ describe("TasteLift train-only catalog retrieval", () => {
     expect(candidates.map((track) => track.mbid)).toEqual(["co-a", "co-b"]);
     expect(candidates[0]?.support).toBe(1);
     expect(candidates[0]?.evidence[0]?.source).toBe("listenbrainz-history");
+  });
+
+  test("fuses source ranks so agreement outranks rigid source position", () => {
+    const external = {
+      seeds,
+      candidates: Array.from({ length: 6 }, (_, index) => ({
+        mbid: `external-${index}`, artist: `External ${index}`, title: `Track ${index}`,
+        alternateMbids: [`external-${index}`], support: 1, retrievalScore: 10 - index,
+        evidence: [{ source: "listenbrainz" as const, seedIndex: 0, seedMbid: "seed-0", recordingMbid: `external-${index}`, rank: index + 1, rawScore: 10 - index }],
+      })),
+    };
+    const neural = [{
+      ...external.candidates[4]!,
+      evidence: [{ source: "tastelift-catalog" as const, seedIndex: 0, seedMbid: "seed-0", recordingMbid: "external-4", rank: 1, rawScore: 1 }],
+    }];
+
+    const merged = mergeTasteCandidateSources(external, neural, 5);
+
+    expect(merged.candidates[0]?.mbid).toBe("external-4");
+    expect(merged.candidates[0]?.evidence.map((item) => item.source)).toEqual(["listenbrainz", "tastelift-catalog"]);
   });
 });

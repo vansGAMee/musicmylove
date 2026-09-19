@@ -4,6 +4,7 @@ import { createTasteResolverAdapters, resolveTasteSeeds } from "../../../src/lib
 import { recommendTasteSeeds } from "../../../src/lib/tastelift/pipeline";
 import { spotifySearch } from "../../../src/lib/listenbrainz";
 import { tasteliftRateLimiter, getClientIp } from "../../../src/lib/rate-limit";
+import type { TasteLiftFeedback } from "../../../src/lib/tastelift/model";
 
 // Vercel Serverless maximum execution limit (up to 60s supported)
 export const maxDuration = 60;
@@ -48,20 +49,45 @@ export async function handleTasteLiftPost(request: Request, dependencies: TasteL
   }
 
   try {
-    const inputs = (dependencies.parseTasteInput ?? parseTasteInput)(body);
+    const receivedRows = Array.isArray(body) ? body : typeof body === "object" && body !== null && Array.isArray((body as { songs?: unknown[] }).songs) ? (body as { songs: unknown[] }).songs : [];
+    const inputs = (dependencies.parseTasteInput ?? parseTasteInput)(body, { allowPartial: true });
     const seeds = await (dependencies.resolveTasteSeeds ?? resolveTasteSeeds)(
       inputs,
       (dependencies.createTasteResolverAdapters ?? createTasteResolverAdapters)()
     );
-    if (seeds.some((seed) => seed.status === "unresolved")) {
+    const usableSeeds = seeds.filter((seed) => seed.status === "resolved");
+    if (usableSeeds.length < 5) {
       return NextResponse.json(
-        { error: "Every seed must resolve before recommendations can be generated", seeds },
+        { error: "At least five seeds must resolve before recommendations can be generated", seeds },
         { status: 422 }
       );
     }
-    const result = await (dependencies.recommendTasteSeeds ?? recommendTasteSeeds)(seeds);
+    const normalizedKeys = receivedRows.flatMap((row): string[] => {
+      if (typeof row !== "object" || row === null) return [];
+      const item = row as { artist?: unknown; title?: unknown };
+      if (typeof item.artist !== "string" || !item.artist.trim() || typeof item.title !== "string" || !item.title.trim()) return [];
+      const normalize = (value: string) => value.normalize("NFKC").trim().toLowerCase().replace(/\s+/gu, " ");
+      return [`${normalize(item.artist)}\u0000${normalize(item.title)}`];
+    });
+    const duplicates = normalizedKeys.length - new Set(normalizedKeys).size;
+    const feedbackRows = typeof body === "object" && body !== null && Array.isArray((body as { feedback?: unknown[] }).feedback) ? (body as { feedback: unknown[] }).feedback : [];
+    const feedback: TasteLiftFeedback[] = feedbackRows.slice(0, 200).flatMap((row): TasteLiftFeedback[] => {
+      if (typeof row !== "object" || row === null) return [];
+      const item = row as { artist?: unknown; title?: unknown; value?: unknown };
+      if (typeof item.artist !== "string" || !item.artist.trim() || typeof item.title !== "string" || !item.title.trim() || (item.value !== "like" && item.value !== "dislike")) return [];
+      return [{ track: { artist: item.artist.trim(), title: item.title.trim() }, value: item.value }];
+    });
+    const result = await (dependencies.recommendTasteSeeds ?? recommendTasteSeeds)(usableSeeds, { feedback });
     return NextResponse.json({
       seeds,
+      importCounts: {
+        received: receivedRows.length,
+        parsed: inputs.length,
+        resolved: usableSeeds.filter((seed) => seed.source !== "text").length,
+        textFallback: usableSeeds.filter((seed) => seed.source === "text").length,
+        unresolved: seeds.filter((seed) => seed.status === "unresolved").length + Math.max(0, receivedRows.length - duplicates - inputs.length),
+        duplicates,
+      },
       candidateCount: result.candidateCount,
       recommendations: result.recommendations.map((track) => ({
         mbid: track.mbid,

@@ -391,7 +391,7 @@ test("persists liked tracks to localStorage favorite-tracks cache and loads them
   expect(storedAfterUnlike.some((t: { title: string }) => t.title === "Saved From Cache")).toBe(true);
 });
 
-test("incorporates cached favorite tracks into taste seeds when requesting recommendations", async () => {
+test("sends cached favorites as signed feedback without mutating imported taste seeds", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("/api/tastelift")) {
@@ -447,10 +447,9 @@ test("incorporates cached favorite tracks into taste seeds when requesting recom
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
   const sentSongTitles = sentPayload.songs.map((s: { title: string }) => s.title);
 
-  // Must include the favorite track loaded from persistent cache!
-  expect(sentSongTitles).toContain("Previous Love");
+  expect(sentSongTitles).not.toContain("Previous Love");
+  expect(sentPayload.feedback).toContainEqual({ artist: "Loved Creator", title: "Previous Love", value: "like" });
 });
-
 
 
 

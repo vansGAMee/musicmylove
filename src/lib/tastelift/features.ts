@@ -1,5 +1,5 @@
 import type { CandidateEvidence, SeedEvidence } from "../types";
-import { TasteLiftModel, type TasteLiftTrack } from "./model";
+import { TasteLiftModel, type TasteLiftFeedback, type TasteLiftTrack } from "./model";
 
 export interface TasteLiftRankingFields {
   tasteHead: number;
@@ -23,8 +23,8 @@ const asTasteTrack = (track: Pick<TasteLiftTrack, "mbid" | "artist" | "title"> &
  * Keeps retrieval support as explicit evidence and makes the learned lift additive
  * to the legacy residual score. Spotify identifiers are deliberately absent.
  */
-export function buildTasteLiftRankingFields(model: TasteLiftModel, seeds: readonly TasteLiftTrack[], candidates: readonly CandidateEvidence[]): Map<string, TasteLiftRankingFields> {
-  const scored = model.scoreCandidates(seeds.map(asTasteTrack), candidates.map(asTasteTrack));
+export function buildTasteLiftRankingFields(model: TasteLiftModel, seeds: readonly TasteLiftTrack[], candidates: readonly CandidateEvidence[], feedback: readonly TasteLiftFeedback[] = []): Map<string, TasteLiftRankingFields> {
+  const scored = model.scoreCandidates(seeds.map(asTasteTrack), candidates.map(asTasteTrack), feedback);
   return new Map(candidates.map((candidate, index) => {
     const score = scored.candidates[index]!;
     const seedSupportEvidence = [...candidate.evidence].sort((left, right) => left.seedMbid.localeCompare(right.seedMbid) || (left.seedIndex ?? 0) - (right.seedIndex ?? 0) || left.rank - right.rank || (left.recordingMbid ?? "").localeCompare(right.recordingMbid ?? "") || right.rawScore - left.rawScore);

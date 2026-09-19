@@ -26,7 +26,7 @@ export interface TextResolvedTasteSeed {
   source: "text";
   diagnostic: {
     status: "retrieval_unavailable";
-    code: "no_exact_mbid";
+    code: "no_exact_mbid" | "upstream_error";
     message: string;
   };
 }
@@ -93,11 +93,12 @@ function exactMatch(input: TasteSeedInput, tracks: readonly Track[]): Track | nu
     .sort((left, right) => left.mbid < right.mbid ? -1 : left.mbid > right.mbid ? 1 : 0)[0] ?? null;
 }
 
-function upstreamError(input: TasteSeedInput, error: unknown): UnresolvedTasteSeed {
+function upstreamError(input: TasteSeedInput, error: unknown): TextResolvedTasteSeed {
   return {
     input,
-    status: "unresolved",
-    error: { code: "upstream_error", message: error instanceof Error ? error.message : "Resolver unavailable" },
+    status: "resolved",
+    source: "text",
+    diagnostic: { status: "retrieval_unavailable", code: "upstream_error", message: error instanceof Error ? error.message : "Resolver unavailable" },
   };
 }
 

@@ -133,15 +133,43 @@ class TasteLift(nn.Module):
         attention = torch.softmax(logits.masked_fill(~active[:, None, :], -torch.inf), dim=-1)
         return F.normalize(attention @ vectors, dim=-1, eps=self.normalization_epsilon)
 
+    def encode_seed_vectors(self, track_ids, mask):
+        """Return canonically ordered seed vectors and their active mask."""
+        if track_ids.ndim != 2 or mask.shape != track_ids.shape:
+            raise ValueError("track ids and mask must have matching [batch, seeds] shape")
+        counts = mask.sum(dim=1)
+        if torch.any(counts < 5) or torch.any(counts > 500):
+            raise ValueError("each seed set must contain 5 to 500 tracks")
+        ordered = torch.sort(track_ids.masked_fill(~mask.bool(), len(self.tracks)), dim=1).values
+        ordered = ordered[:, :int(counts.max())]
+        active = ordered != len(self.tracks)
+        return self.encode_tracks(ordered.clamp(max=len(self.tracks) - 1)), active, ordered
+
     def score_embeddings(self, heads, candidates, popularity):
         per_head = torch.einsum("bhd,bcd->bch", heads, candidates) * F.softplus(self.log_score_scale)
         affinity = self.affinity_temperature * torch.logsumexp(per_head / self.affinity_temperature, dim=-1)
         prior = F.softplus(self.log_popularity_weight) * popularity
         return {"per_head": per_head, "affinity": affinity, "popularity_prior": prior, "lift": affinity - prior}
 
+    def score_target_embeddings(self, seed_vectors, seed_mask, candidates):
+        """Score each candidate against its learned top-eight seed context."""
+        similarities = torch.einsum("bsd,bcd->bcs", seed_vectors, candidates)
+        similarities = similarities.masked_fill(~seed_mask[:, None, :], -torch.inf)
+        context_size = min(8, similarities.shape[-1])
+        top, indices = torch.topk(similarities, k=context_size, dim=-1, largest=True, sorted=True)
+        attention = torch.softmax(top / 0.12, dim=-1)
+        relevance = (torch.where(torch.isfinite(top), top, torch.zeros_like(top)) * attention).sum(dim=-1) * F.softplus(self.log_score_scale)
+        return {"relevance": relevance, "context_seed_indices": indices}
+
     def score_candidates(self, track_ids, mask, candidate_ids):
         heads = self.encode_set(track_ids, mask)
-        return self.score_embeddings(heads, self.encode_tracks(candidate_ids), self.popularity[candidate_ids])
+        seed_vectors, seed_mask, ordered = self.encode_seed_vectors(track_ids, mask)
+        candidates = self.encode_tracks(candidate_ids)
+        diagnostics = self.score_embeddings(heads, candidates, self.popularity[candidate_ids])
+        target = self.score_target_embeddings(seed_vectors, seed_mask, candidates)
+        canonical_indices = ordered[:, None, :].expand(-1, candidate_ids.shape[1], -1).gather(2, target["context_seed_indices"])
+        return {**diagnostics, "affinity": target["relevance"], "popularity_prior": torch.zeros_like(target["relevance"]),
+                "lift": target["relevance"], "context_seed_indices": canonical_indices}
 
     def diversity_loss(self, heads):
         eye = torch.eye(4, device=heads.device)
@@ -150,13 +178,14 @@ class TasteLift(nn.Module):
 
     def loss(self, seeds, mask, positive, negative, diversity_weight=0.02):
         heads = self.encode_set(seeds, mask)
+        seed_vectors, seed_mask, _ = self.encode_seed_vectors(seeds, mask)
         if negative.ndim == 1:
             candidates = torch.stack([positive, negative], dim=1)
-            scores = self.score_embeddings(heads, self.encode_tracks(candidates), self.popularity[candidates])["lift"]
+            scores = self.score_target_embeddings(seed_vectors, seed_mask, self.encode_tracks(candidates))["relevance"]
             bpr = bpr_loss(scores[:, 0], scores[:, 1])
         else:
             candidates = torch.cat([positive.unsqueeze(1), negative], dim=1)
-            scores = self.score_embeddings(heads, self.encode_tracks(candidates), self.popularity[candidates])["lift"]
+            scores = self.score_target_embeddings(seed_vectors, seed_mask, self.encode_tracks(candidates))["relevance"]
             pos_scores = scores[:, :1]
             neg_scores = scores[:, 1:]
             bpr = F.softplus(neg_scores - pos_scores).mean()
@@ -317,9 +346,9 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
             was_training = model.training
             model.eval()
             with torch.no_grad():
-                heads = model.encode_set(seeds, mask)
+                seed_vectors, seed_mask, _ = model.encode_seed_vectors(seeds, mask)
                 cand_vecs = model.encode_tracks(candidates_32)
-                scores_32 = model.score_embeddings(heads, cand_vecs, model.popularity[candidates_32])["lift"]
+                scores_32 = model.score_target_embeddings(seed_vectors, seed_mask, cand_vecs)["relevance"]
                 k_hard = min(4, scores_32.shape[1])
                 top_hard_indices = torch.topk(scores_32, k=k_hard, dim=-1).indices
                 hardest_negatives = candidates_32.gather(1, top_hard_indices)
@@ -336,8 +365,9 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
                 batch = validation[offset:offset + batch_size]
                 seeds, mask, positive, negative = _batch(model, batch, device)
                 heads = model.encode_set(seeds, mask)
+                seed_vectors, seed_mask, _ = model.encode_seed_vectors(seeds, mask)
                 candidates = torch.stack([positive, negative], dim=1)
-                scores = model.score_embeddings(heads, model.encode_tracks(candidates), model.popularity[candidates])["lift"]
+                scores = model.score_target_embeddings(seed_vectors, seed_mask, model.encode_tracks(candidates))["relevance"]
                 validation_loss += float(bpr_loss(scores[:, 0], scores[:, 1])) * len(batch)
                 correct += int((scores[:, 0] > scores[:, 1]).sum())
                 head_diversity += float(model.diversity_loss(heads)) * len(batch)

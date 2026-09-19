@@ -105,10 +105,10 @@ export function retrieveTasteCatalogCandidates(seeds: readonly ResolvedTasteSeed
   const shortlist = [...byIdentity.values()]
     .sort((left, right) => right.lift - left.lift || left.track.mbid.localeCompare(right.track.mbid))
     .slice(0, shortlistSize);
-  const candidates = shortlist.map(({ track, vector, lift }): TasteCandidate => {
+  const candidates = shortlist.map(({ track, vector }): TasteCandidate => {
     const supported = strongestSeedMatches(encodedSeeds, vector);
     const supportBonus = 0.12 * Math.log1p(supported.length) / Math.log1p(Math.max(1, activeSeeds.length));
-    const retrievalScore = lift + supportBonus;
+    const retrievalScore = model.scoreTargetCandidate(encodedSeeds, vector).relevance + supportBonus;
     const evidence: TasteCandidateEvidence[] = supported.map((item) => ({
       source: "tastelift-catalog",
       seedIndex: item.index,
@@ -184,38 +184,33 @@ export function expandTasteCandidatePool(pool: TasteCandidatePool, artifact: Tas
 
 export function mergeTasteCandidateSources(pool: TasteCandidatePool, neural: readonly TasteCandidate[], limit = 500, history: readonly TasteCandidate[] = []): TasteCandidatePool {
   const target = Math.max(0, Math.floor(limit));
-  const external = [...pool.candidates];
-  const selected: TasteCandidate[] = [];
-  const identityIndexes = new Map<string, number>();
-  const append = (candidate: TasteCandidate) => {
+  const combined = new Map<string, { candidate: TasteCandidate; fusion: number; bestRaw: number }>();
+  const append = (candidate: TasteCandidate, fusion: number) => {
     const identity = recordingIdentity(candidate);
-    const selectedIndex = identityIndexes.get(identity);
-    if (selectedIndex !== undefined) {
-      const previous = selected[selectedIndex]!;
+    const existing = combined.get(identity);
+    if (existing) {
+      const previous = existing.candidate;
       const evidence = [...previous.evidence, ...candidate.evidence].filter((item, index, rows) => rows.findIndex((other) => other.source === item.source && other.seedIndex === item.seedIndex && other.recordingMbid === item.recordingMbid) === index);
-      selected[selectedIndex] = {
-        ...previous,
-        alternateMbids: [...new Set([...previous.alternateMbids, ...candidate.alternateMbids])].sort(),
-        evidence,
-        support: new Set(evidence.map((item) => item.seedIndex)).size,
-        retrievalScore: Math.max(previous.retrievalScore, candidate.retrievalScore),
+      const bestRaw = Math.max(existing.bestRaw, candidate.retrievalScore);
+      combined.set(identity, { fusion: existing.fusion + fusion, bestRaw, candidate: {
+        ...(candidate.retrievalScore > previous.retrievalScore ? candidate : previous),
+        alternateMbids: [...new Set([...previous.alternateMbids, ...candidate.alternateMbids])].sort(), evidence,
+        support: new Set(evidence.map((item) => item.seedIndex)).size, retrievalScore: existing.fusion + fusion,
         popularityPercentile: previous.popularityPercentile ?? candidate.popularityPercentile,
-      };
+      } });
       return;
     }
-    if (selected.length >= target) return;
-    identityIndexes.set(identity, selected.length);
-    selected.push(candidate);
+    combined.set(identity, { candidate: { ...candidate, retrievalScore: fusion }, fusion, bestRaw: candidate.retrievalScore });
   };
-  const sources = [external, history, [...neural]].filter((source) => source.length > 0);
-  const sourceQuota = sources.length ? Math.floor(target / sources.length) : 0;
-  const indexes = sources.map((source) => Math.min(sourceQuota, source.length));
-  sources.forEach((source) => source.slice(0, sourceQuota).forEach(append));
-  while (selected.length < target && sources.some((source, index) => indexes[index]! < source.length)) {
-    sources.forEach((source, index) => {
-      if (indexes[index]! < source.length) append(source[indexes[index]!]!);
-      indexes[index] = indexes[index]! + 1;
-    });
-  }
-  return { seeds: [...pool.seeds], candidates: selected };
+  const sources = [
+    { rows: [...pool.candidates], weight: 1 },
+    { rows: [...history], weight: 1.2 },
+    { rows: [...neural], weight: 1 },
+  ];
+  for (const { rows, weight } of sources) rows.forEach((candidate, index) => append(candidate, weight / (60 + index + 1)));
+  const candidates = [...combined.values()]
+    .sort((left, right) => right.fusion - left.fusion || right.bestRaw - left.bestRaw || left.candidate.mbid.localeCompare(right.candidate.mbid))
+    .slice(0, target)
+    .map((row) => ({ ...row.candidate, retrievalScore: row.fusion }));
+  return { seeds: [...pool.seeds], candidates };
 }

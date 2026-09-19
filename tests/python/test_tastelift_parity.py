@@ -34,14 +34,14 @@ def test_real_export_matches_typescript_heads_scores_and_lift(tmp_path):
     candidate_ids = torch.tensor([[model.track_index[track["id"]] for track in tracks[5:]]])
     with torch.no_grad():
         heads = model.encode_set(ids, torch.ones_like(ids, dtype=torch.bool))
-        score = model.score_embeddings(heads, model.encode_tracks(candidate_ids), model.popularity[candidate_ids])
+        score = model.score_candidates(ids, torch.ones_like(ids, dtype=torch.bool), candidate_ids)
     expected = {
         "heads": heads[0].tolist(),
         "candidates": [{key: score[key][0, index].tolist() if key == "per_head" else score[key][0, index].item()
                         for key in ("per_head", "affinity", "popularity_prior", "lift")}
                        for index in range(candidate_ids.shape[1])],
     }
-    assert expected["candidates"][0]["popularity_prior"] > 0
+    assert expected["candidates"][0]["popularity_prior"] == 0
     payload = {"seeds": tracks[:5], "candidates": [
         {"mbid": track["id"], "artist": track["artist"], "title": track["title"],
          **({"popularityPercentile": track["popularity"]["percentile"]} if "popularity" in track else {})}

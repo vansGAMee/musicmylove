@@ -54,4 +54,32 @@ describe("TasteLiftModel", () => {
     expect(score.candidates[0]!.popularityPercentile).toBe(0.5);
     expect(score.candidates[0]!.popularityPercentile).not.toBe(0);
   });
+
+  test("selects a bounded candidate-specific context from all seeds", () => {
+    const model = TasteLiftModel.fromArtifact(artifact);
+    const manySeeds = Array.from({ length: 500 }, (_, index) => ({
+      mbid: `seed-${String(index).padStart(3, "0")}`,
+      artist: `Artist ${index}`,
+      title: `Title ${index}`,
+    }));
+    const candidate = manySeeds[437]!;
+
+    const score = model.scoreCandidates(manySeeds, [candidate]).candidates[0]!;
+
+    expect(score.contextSeedIndexes.length).toBeLessThanOrEqual(8);
+    expect(score.contextSeedIndexes).toContain(437);
+    expect(model.scoreCandidates(manySeeds.slice(0, 5), [manySeeds[0]!]).candidates[0]!.contextSeedIndexes).toHaveLength(5);
+  });
+
+  test("applies signed learned-embedding feedback without changing the seed profile", () => {
+    const model = TasteLiftModel.fromArtifact(artifact);
+    const candidate = candidates[0]!;
+    const neutral = model.scoreCandidates(seeds, [candidate]).candidates[0]!.lift;
+    const liked = model.scoreCandidates(seeds, [candidate], [{ track: candidate, value: "like" }]).candidates[0]!.lift;
+    const disliked = model.scoreCandidates(seeds, [candidate], [{ track: candidate, value: "dislike" }]).candidates[0]!.lift;
+
+    expect(liked).toBeGreaterThan(neutral);
+    expect(disliked).toBeLessThan(neutral);
+    expect(model.scoreCandidates(seeds, [candidate], []).candidates[0]!.lift).toBe(neutral);
+  });
 });
