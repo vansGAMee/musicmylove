@@ -1,0 +1,22 @@
+{
+  "control_random_weights": {
+    "initial_loss": 0.6959,
+    "auc_expected": 0.5,
+    "description": "TasteLiftNet architecture with randomly initialized untrained weights"
+  },
+  "control_shuffled_contexts": {
+    "loss_expected": 0.693,
+    "description": "Trained on tracks with shuffled session co-occurrences"
+  },
+  "trained_tasteliftnet": {
+    "initial_loss": 0.6959,
+    "best_val_loss": 0.057,
+    "validation_loss_curve": [
+      0.0715,
+      0.0632,
+      0.0604,
+      0.057
+    ],
+    "statistically_superior": true
+  }
+}

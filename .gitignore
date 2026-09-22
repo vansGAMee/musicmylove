@@ -7,13 +7,12 @@ test-results/
 __pycache__/
 .pytest_cache/
 .venv
-data/cache/
-data/downloads/
-data/manifests/
-*.pyc
-*.tsbuildinfo
-.DS_Store
-.vercel
+data/
+models/*.pt
+models/*.npy
+models/catalog_embeddings.json
 
 out/
 public/data/
+.vercel/
+*.tsbuildinfo
