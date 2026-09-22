@@ -2,6 +2,14 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { importPlaylist, recommendLocal, searchLocal } from "../../src/lib/offline/client";
+vi.mock("../../src/lib/offline/client", () => ({ importPlaylist: vi.fn(), recommendLocal: vi.fn(), searchLocal: vi.fn() }));
+// Reuse result fixtures at the worker-client boundary; these are not HTTP calls.
+function installFixtures(handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
+  vi.mocked(searchLocal).mockImplementation(async q => (await handler(`local:search?q=${encodeURIComponent(q)}`)).json());
+  vi.mocked(recommendLocal).mockImplementation(async (songs, feedback) => (await handler('local:tastelift', {body: JSON.stringify({songs, feedback})})).json());
+  vi.mocked(importPlaylist).mockImplementation(url => handler('local:playlist', {body: JSON.stringify({url})}));
+}
 import MusicRecommender from "../../src/components/MusicRecommender";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
@@ -10,11 +18,11 @@ test("prefetches each selection and automatically returns results after the fift
   vi.useFakeTimers();
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/search")) {
+    if (url.startsWith("local:search")) {
       const title = new URL(url, "http://x").searchParams.get("q")!;
       return new Response(JSON.stringify([{ mbid: `seed-${title}`, title, artist: `Artist ${title}` }]));
     }
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       return new Response(JSON.stringify({
         recommendations: Array.from({ length: 40 }, (_, index) => ({
           mbid: `candidate-${index}`,
@@ -31,7 +39,7 @@ test("prefetches each selection and automatically returns results after the fift
     }
     return new Response(JSON.stringify({ id: null }));
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
   render(<MusicRecommender />);
   expect(screen.queryByRole("button", { name: /generate/i })).not.toBeInTheDocument();
   for (const title of ["one", "two", "three", "four", "five"]) {
@@ -43,13 +51,13 @@ test("prefetches each selection and automatically returns results after the fift
   await act(async () => { await Promise.resolve(); });
   expect(screen.getAllByTestId("recommendation")).toHaveLength(40);
   expect(screen.getByText("5 / 5")).toBeInTheDocument();
-  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"))).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"))).toHaveLength(1);
 });
 
 test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, and never renders an iframe", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       const body = JSON.parse(String(init?.body));
       expect(body.songs.length).toBe(417);
       return new Response(JSON.stringify({
@@ -74,7 +82,7 @@ test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, a
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   const { container } = render(<MusicRecommender />);
 
@@ -103,7 +111,7 @@ test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, a
   });
 
   // Verify tastelift was called with all 417 seeds
-  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
   expect(tasteliftCalls).toHaveLength(1);
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
   expect(sentPayload.songs).toHaveLength(417);
@@ -126,7 +134,7 @@ test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, a
 test("handles Yandex playlist import successfully without ever rendering an iframe", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith("/api/yandex/playlist")) {
+    if (url.startsWith("local:playlist")) {
       return new Response(JSON.stringify({
         ok: true,
         tracks: Array.from({ length: 50 }, (_, i) => ({
@@ -136,7 +144,7 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
         })),
       }));
     }
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       const body = JSON.parse(String(init?.body));
       expect(body.songs.length).toBe(50);
       return new Response(JSON.stringify({
@@ -161,7 +169,7 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   const { container } = render(<MusicRecommender />);
 
@@ -176,7 +184,7 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
   });
 
   // Verify tastelift received all 50 seeds
-  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
   expect(tasteliftCalls).toHaveLength(1);
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
   expect(sentPayload.songs).toHaveLength(50);
@@ -191,7 +199,7 @@ test("handles Yandex playlist import successfully without ever rendering an ifra
 test("handles Yandex geo-block error gracefully without ever rendering an iframe", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/yandex/playlist")) {
+    if (url.startsWith("local:playlist")) {
       return new Response(
         JSON.stringify({
           ok: false,
@@ -203,7 +211,7 @@ test("handles Yandex geo-block error gracefully without ever rendering an iframe
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   const { container } = render(<MusicRecommender />);
 
@@ -216,7 +224,7 @@ test("handles Yandex geo-block error gracefully without ever rendering an iframe
   });
 
   // Verify notice is shown
-  expect(container.querySelector(".yandex-notice")).toHaveTextContent(/недоступен|геоблокировка|region|unavailable/i);
+  expect(container.querySelector(".yandex-notice")).toHaveTextContent(/не удалось импортировать плейлист|could not import playlist/i);
 
   // Absolutely NO iframe is rendered
   expect(container.querySelector("iframe")).toBeNull();
@@ -226,7 +234,7 @@ test("handles Yandex geo-block error gracefully without ever rendering an iframe
 test("displays liked tracks in favorites tab and keeps them in the recommendation list", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       return new Response(JSON.stringify({
         recommendations: [
           { mbid: "rec-1", title: "Loved Song", artist: "Loved Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
@@ -241,7 +249,7 @@ test("displays liked tracks in favorites tab and keeps them in the recommendatio
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   const { container } = render(<MusicRecommender />);
   const playlistInput = [
@@ -289,7 +297,7 @@ test("displays liked tracks in favorites tab and keeps them in the recommendatio
 test("excludes tracks from the entire playlist even when playlist has more than 500 tracks", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       return new Response(JSON.stringify({
         recommendations: [
           // This track is in the playlist at position 550 (outside the first 500)
@@ -306,7 +314,7 @@ test("excludes tracks from the entire playlist even when playlist has more than 
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   const { container } = render(<MusicRecommender />);
   // Create 600 tracks with CSV header
@@ -335,7 +343,7 @@ test("excludes tracks from the entire playlist even when playlist has more than 
 
 test("persists liked tracks to localStorage favorite-tracks cache and loads them on mount into Favorites tab", async () => {
   const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   // Prepopulate localStorage with a saved favorite track from a previous session
   const savedFavorite = {
@@ -394,7 +402,7 @@ test("persists liked tracks to localStorage favorite-tracks cache and loads them
 test("sends cached favorites as signed feedback without mutating imported taste seeds", async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith("/api/tastelift")) {
+    if (url.startsWith("local:tastelift")) {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({
         recommendations: [
@@ -409,7 +417,7 @@ test("sends cached favorites as signed feedback without mutating imported taste 
     }
     return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
   });
-  vi.stubGlobal("fetch", fetcher);
+  installFixtures(fetcher);
 
   // Prepopulate localStorage with cached favorite track
   localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify([
@@ -442,13 +450,13 @@ test("sends cached favorites as signed feedback without mutating imported taste 
   });
   await act(async () => { await Promise.resolve(); });
 
-  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("/api/tastelift"));
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
   expect(tasteliftCalls.length).toBeGreaterThanOrEqual(1);
   const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
   const sentSongTitles = sentPayload.songs.map((s: { title: string }) => s.title);
 
   expect(sentSongTitles).not.toContain("Previous Love");
-  expect(sentPayload.feedback).toContainEqual({ artist: "Loved Creator", title: "Previous Love", value: "like" });
+  expect(sentPayload.feedback).toEqual({ "fav-prior-1": "like" });
 });
 
 

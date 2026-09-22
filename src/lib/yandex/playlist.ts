@@ -26,6 +26,7 @@ export interface YandexFetchOptions {
   retries?: number;
   fetcher?: typeof fetch;
   skipCache?: boolean;
+  requireComplete?: boolean;
 }
 
 interface CachedPlaylist {
@@ -735,7 +736,7 @@ export async function fetchYandexPlaylist(
   const normalized = normalizeYandexPlaylistUrl(rawUrl);
 
   if (!options.skipCache) {
-    const cached = PLAYLIST_CACHE.get(normalized.canonicalUrl);
+    const cached = options.requireComplete ? undefined : PLAYLIST_CACHE.get(normalized.canonicalUrl);
     if (cached && Date.now() - cached.timestamp < PLAYLIST_CACHE_TTL_MS) {
       return cached.result;
     }
@@ -807,6 +808,9 @@ export async function fetchYandexPlaylist(
             const parsed = parseRawTrack(item);
             if (parsed) parsedTracks.push(parsed);
           }
+          if (options.requireComplete && (typeof data.playlist?.trackCount !== "number" || data.playlist.trackCount !== parsedTracks.length)) {
+            throw new Error("Incomplete playlist response");
+          }
           const deduplicated = deduplicateTracks(parsedTracks);
           return cacheAndReturn(
             normalized.canonicalUrl,
@@ -871,6 +875,9 @@ export async function fetchYandexPlaylist(
               const parsed = parseRawTrack(item);
               if (parsed) parsedTracks.push(parsed);
             }
+            if (options.requireComplete && (typeof data.result?.trackCount !== "number" || data.result.trackCount !== parsedTracks.length)) {
+              throw new Error("Incomplete playlist response");
+            }
             const deduplicated = deduplicateTracks(parsedTracks);
             return cacheAndReturn(
               normalized.canonicalUrl,
@@ -914,6 +921,12 @@ export async function fetchYandexPlaylist(
     throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
   }
   const extracted = extractFromHtmlState(html);
+  if (options.requireComplete) {
+    const counts = [...html.replace(/\\"/g, '"').matchAll(/"trackCount"\s*:\s*(\d+)/g)].map(m => Number(m[1]));
+    if (counts.length !== 1 || counts[0] !== extracted.tracks.length) {
+      throw new YandexPlaylistError("upstream_error", "Яндекс вернул неполный список или не подтвердил число треков. Импорт остановлен, чтобы не потерять часть плейлиста.");
+    }
+  }
 
   // If HTML revealed owner & kind that we didn't have before, try API one more time
   if ((!currentOwner || !currentKind) && extracted.owner && extracted.kind) {

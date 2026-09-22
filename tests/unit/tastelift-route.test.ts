@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { handleTasteLiftPost } from "../../app/api/tastelift/route";
+import { handleTasteLiftPost } from "../../legacy/api/tastelift/route";
 import { LastFmResponseError, resolveTasteSeeds as resolveSeeds, type ResolvedTasteSeed } from "../../src/lib/tastelift/resolver";
 
 const body = { songs: Array.from({ length: 5 }, (_, index) => ({ artist: `Artist ${index}`, title: `Song ${index}` })) };

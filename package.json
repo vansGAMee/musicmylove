@@ -4,19 +4,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "next dev --webpack",
+    "build": "npm run build:catalog && next build --webpack",
+    "start": "tsx scripts/offline/serve.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "smoke:live": "tsx scripts/live-smoke.ts"
+    "smoke:live": "tsx scripts/live-smoke.ts",
+    "build:catalog": "tsx scripts/offline/build.ts",
+    "gateway": "tsx services/gateway.ts",
+    "smoke:offline": "tsx scripts/offline/smoke.ts"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
     "next": "16.3.5",
+    "parse5": "^8.0.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
@@ -28,6 +32,7 @@
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
+    "esbuild": "^0.27.4",
     "eslint": "^9.35.0",
     "eslint-config-next": "16.3.5",
     "jsdom": "^27.0.0",

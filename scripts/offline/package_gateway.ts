@@ -1,0 +1,10 @@
+import { build } from 'esbuild';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+const dir='data/cache/gateway-package';
+await mkdir(dir,{recursive:true});
+await build({entryPoints:['services/cloud-function.ts'],bundle:true,platform:'node',target:'node22',format:'cjs',outfile:dir+'/index.js',minify:true});
+const catalog=JSON.parse(await readFile('ml/tastelift-catalog.json','utf8'));
+await writeFile(dir+'/catalog.json',JSON.stringify({tracks:catalog.tracks.map(({mbid,artist,title}:{mbid:string;artist:string;title:string})=>({mbid,artist,title}))}));
+execFileSync('python',['-c',"import zipfile; from pathlib import Path; p=Path('data/cache/gateway-package'); z=zipfile.ZipFile('data/cache/gateway.zip','w',zipfile.ZIP_DEFLATED); [z.write(p/f,f) for f in ['index.js','catalog.json']]; z.close()"]);
+console.log('Ready: data/cache/gateway.zip; entrypoint index.handler, runtime nodejs22');

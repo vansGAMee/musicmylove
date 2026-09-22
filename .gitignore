@@ -6,7 +6,7 @@ playwright-report/
 test-results/
 __pycache__/
 .pytest_cache/
-.venv/
+.venv
 data/cache/
 data/downloads/
 data/manifests/
@@ -14,3 +14,6 @@ data/manifests/
 *.tsbuildinfo
 .DS_Store
 .vercel
+
+out/
+public/data/

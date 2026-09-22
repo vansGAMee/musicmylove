@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RankedTrack, SeedTrack, Track } from "../lib/types";
 import { downloadTasteCardPng } from "../lib/exportCard";
 import { parseFileContentToSongs } from "../lib/tastelift/input";
+import { importPlaylist, recommendLocal, searchLocal } from "../lib/offline/client";
 import { recordingIdentity } from "../lib/tastelift/identity";
 
 const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT", "M3U"] as const;
@@ -59,6 +60,7 @@ const TRANSLATIONS = {
     navPlaylists: "Плейлисты",
     badgeHead: "Вкус",
     badgePop: "% поп",
+    popInsufficient: "Популярность: мало данных",
     badgeLift: "лифт",
     likeAria: "В избранное",
     dislikeAria: "Скрыть трек",
@@ -98,7 +100,7 @@ const TRANSLATIONS = {
     yandexPrivate: "Этот плейлист приватный. Сделайте его публичным в настройках.",
     yandexInvalidUrl: "Некорректная ссылка на плейлист Яндекс Музыки",
     yandexRateLimited: "Слишком много запросов. Подождите немного перед повторным импортом.",
-    yandexGeoBlocked: "Яндекс Музыка недоступна из региона сервера. Вставьте треки вручную (Исполнитель — Название, по одному на строку).",
+    yandexGeoBlocked: "Не удалось импортировать плейлист. Попробуйте ещё раз.",
     yandexImportedSuccess: "Импортировано треков: {count}",
     yandexEmpty: "В плейлисте не найдено треков",
     importedBadge: "Импортировано: {count}",
@@ -138,6 +140,7 @@ const TRANSLATIONS = {
     navPlaylists: "Playlists",
     badgeHead: "Head",
     badgePop: "% pop",
+    popInsufficient: "Popularity: insufficient data",
     badgeLift: "lift",
     likeAria: "Like track",
     dislikeAria: "Dislike track",
@@ -177,7 +180,7 @@ const TRANSLATIONS = {
     yandexPrivate: "This playlist is private. Please make it public in settings.",
     yandexInvalidUrl: "Invalid Yandex Music playlist link",
     yandexRateLimited: "Too many requests. Please wait a moment before trying again.",
-    yandexGeoBlocked: "Yandex Music is unavailable from the server region. Paste tracks manually (Artist — Title, one per line).",
+    yandexGeoBlocked: "Could not import playlist. Please try again.",
     yandexImportedSuccess: "Imported tracks: {count}",
     yandexEmpty: "No tracks found in this playlist",
     importedBadge: "Imported: {count}",
@@ -433,12 +436,8 @@ export default function MusicRecommender() {
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`, { signal: controller.signal });
-        if (response.ok) {
-          const raw = await response.json();
-          const items: Track[] = Array.isArray(raw) ? raw : (raw.results ?? []);
-          setSearchResults(items);
-        }
+        const items = await searchLocal(query.trim());
+        if (!controller.signal.aborted) setSearchResults(items);
       } catch (err) {
         if (!(err instanceof DOMException && err.name === "AbortError")) setSearchResults([]);
       }
@@ -454,65 +453,15 @@ export default function MusicRecommender() {
     setLoading(true);
     setError("");
     try {
-      let bodyToSend = payloadBody;
       const currentFeedback = feedbackOverride ?? feedback;
-      if (typeof payloadBody === "object" && payloadBody !== null) {
-        const bodyObj = payloadBody as { songs?: Array<{ artist: string; title: string; spotify_url?: string }> };
-        if (Array.isArray(bodyObj.songs)) {
-          const baseSongs = bodyObj.songs.slice(-500);
-          const signedFeedback = Object.entries(currentFeedback).flatMap(([mbid, value]) => {
-            const track =
-              rankedPool.find((t) => t.mbid === mbid) ??
-              cachedFavorites.find((t) => t.mbid === mbid) ??
-              seeds.find((s) => s.mbid === mbid) ??
-              INITIAL_FIGMA_TRACKS.find((t) => t.mbid === mbid);
-            return track ? [{ artist: track.artist, title: track.title, value }] : [];
-          });
-          bodyToSend = {
-            ...bodyObj,
-            songs: baseSongs,
-            feedback: signedFeedback,
-          };
-        }
-      }
-
-      const response = await fetch("/api/tastelift", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyToSend),
-      });
-
-      let payload: {
-        error?: string;
-        recommendations?: TasteLiftApiRecommendation[];
-        seeds?: Array<{
-          artist?: string;
-          title?: string;
-          mbid?: string;
-          status?: string;
-          input?: { artist: string; title: string };
-          track?: { mbid?: string; artist: string; title: string; release?: string };
-        }>;
-      } | null = null;
-
-      try {
-        const text = await response.text();
-        if (text && (text.startsWith("{") || text.startsWith("["))) {
-          payload = JSON.parse(text);
-        }
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok || !payload || !payload.recommendations) {
-        throw new Error(payload?.error ?? t.errorRecommendationFailed);
-      }
+      const localBody = payloadBody as { songs?: Array<{artist:string;title:string}> };
+      const payload = await recommendLocal(localBody.songs ?? [], currentFeedback);
       if (payload.seeds && payload.seeds.length > 0) {
-        const resolvedSeeds: SeedTrack[] = payload.seeds.slice(0, 500).map((s, idx) => {
-          const artist = s.track?.artist ?? s.input?.artist ?? s.artist ?? "";
-          const title = s.track?.title ?? s.input?.title ?? s.title ?? "";
+        const resolvedSeeds: SeedTrack[] = payload.seeds.map((s, idx) => {
+          const artist = s.track?.artist ?? s.input?.artist ?? "";
+          const title = s.track?.title ?? s.input?.title ?? "";
           return {
-            mbid: s.track?.mbid ?? s.mbid ?? `seed-resolved-${idx}`,
+            mbid: s.track?.mbid ?? `seed-resolved-${idx}`,
             title,
             artist,
             score: 100,
@@ -525,8 +474,8 @@ export default function MusicRecommender() {
           prev.length > 0
             ? prev
             : payload!.seeds!.map((s) => ({
-                artist: s.track?.artist ?? s.input?.artist ?? s.artist ?? "",
-                title: s.track?.title ?? s.input?.title ?? s.title ?? "",
+                artist: s.track?.artist ?? s.input?.artist ?? "",
+                title: s.track?.title ?? s.input?.title ?? "",
               }))
         );
       }
@@ -537,9 +486,14 @@ export default function MusicRecommender() {
         ...(item.release ? { release: item.release } : {}),
         score: item.score,
         features: Array(17).fill(0),
-        pickedFrom: [],
+        pickedFrom: (item.supportingSeeds ?? []).map((s, idx) => ({
+          mbid: `seed-support-${idx}`,
+          artist: s.artist,
+          title: s.title,
+        })),
         tasteHeadIndex: item.strongestTasteHead,
         seedSupport: item.seedSupport,
+        supportingSeeds: item.supportingSeeds,
         popularityPercentile: item.popularityPercentile,
         liftScore: item.noveltyLiftScore,
       }));
@@ -595,7 +549,7 @@ export default function MusicRecommender() {
 
       if (parsedItems.length === 0) return;
 
-      const seedTracks: SeedTrack[] = parsedItems.slice(0, 500).map((t, idx) => ({
+      const seedTracks: SeedTrack[] = parsedItems.map((t, idx) => ({
         mbid: `seed-shared-${idx}-${Date.now()}`,
         title: t.title,
         artist: t.artist,
@@ -608,7 +562,7 @@ export default function MusicRecommender() {
       setAllPlaylistTracks(parsedItems);
 
       if (parsedItems.length >= 5) {
-        void requestRecommendations({ songs: parsedItems.slice(-500) });
+        void requestRecommendations({ songs: parsedItems });
       }
     } catch {
       // ignore
@@ -627,7 +581,7 @@ export default function MusicRecommender() {
         ...next.map((seed) => ({ artist: seed.artist, title: seed.title })),
         ...importedSeeds,
       ];
-      await requestRecommendations({ songs: allSongs.slice(-500) });
+      await requestRecommendations({ songs: allSongs });
     }
   };
 
@@ -644,7 +598,7 @@ export default function MusicRecommender() {
         return;
       }
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(-500).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.map((s, idx) => ({
         mbid: `seed-upload-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -658,7 +612,7 @@ export default function MusicRecommender() {
 
       if (parsedSongs.length >= 5) {
         await requestRecommendations({
-          songs: parsedSongs.slice(-500).map((s) => ({
+          songs: parsedSongs.map((s) => ({
             artist: s.artist,
             title: s.title,
             ...(s.spotifyUrl ? { spotify_url: s.spotifyUrl } : {}),
@@ -762,26 +716,7 @@ export default function MusicRecommender() {
     setError("");
 
     try {
-      let res: Response;
-      try {
-        // Use GET first to leverage Vercel Edge CDN cache (0 serverless function executions on repeat requests)
-        res = await fetch(`/api/yandex/playlist?url=${encodeURIComponent(cleanUrl)}`, {
-          method: "GET",
-          headers: { "Accept": "application/json" },
-        });
-
-        if (!res.ok && res.status === 405) {
-          // Fallback to POST only if GET method is not allowed
-          res = await fetch("/api/yandex/playlist", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Accept": "application/json" },
-            body: JSON.stringify({ url: cleanUrl }),
-          });
-        }
-      } catch {
-        setYandexNotice(t.yandexGeoBlocked);
-        return;
-      }
+      const res = await importPlaylist(cleanUrl);
 
       let data: {
         ok?: boolean;
@@ -830,7 +765,7 @@ export default function MusicRecommender() {
       setImportedSeeds(parsedSongs);
       setAllPlaylistTracks(parsedSongs);
 
-      const uploadSeeds: SeedTrack[] = parsedSongs.slice(-500).map((s, idx) => ({
+      const uploadSeeds: SeedTrack[] = parsedSongs.map((s, idx) => ({
         mbid: `seed-ym-${idx}-${Date.now()}`,
         title: s.title,
         artist: s.artist,
@@ -842,7 +777,7 @@ export default function MusicRecommender() {
       setYandexNotice(t.yandexImportedSuccess.replace("{count}", String(parsedSongs.length)));
 
       await requestRecommendations({
-        songs: parsedSongs.slice(-500).map((s) => ({
+        songs: parsedSongs.map((s) => ({
           artist: s.artist,
           title: s.title,
         })),
@@ -927,7 +862,7 @@ export default function MusicRecommender() {
           : importedSeeds.length > 0
           ? importedSeeds
           : seeds.map((s) => ({ artist: s.artist, title: s.title }))
-        ).slice(-500);
+        );
         void requestRecommendations({ songs: base }, cleaned);
       }, 350);
     }
@@ -1546,10 +1481,32 @@ export default function MusicRecommender() {
                       {rankedPool.length > 0 && (
                         <div className="track-badges">
                           {track.tasteHeadIndex !== undefined && (
-                            <span className="mini-badge head">{t.badgeHead} {track.tasteHeadIndex + 1}</span>
+                            <span
+                              className={`mini-badge head ${track.supportingSeeds && track.supportingSeeds.length > 0 ? "has-tooltip" : ""}`}
+                              tabIndex={track.supportingSeeds && track.supportingSeeds.length > 0 ? 0 : undefined}
+                              title={track.supportingSeeds && track.supportingSeeds.length > 0 ? `${t.badgeHead} ${track.tasteHeadIndex + 1}: ${track.supportingSeeds.map(s => `${s.artist} — ${s.title}`).join(", ")}` : undefined}
+                            >
+                              {t.badgeHead} {track.tasteHeadIndex + 1}
+                              {track.supportingSeeds && track.supportingSeeds.length > 0 && (
+                                <span className="taste-tooltip" role="tooltip">
+                                  {track.supportingSeeds.map((s, idx) => (
+                                    <span key={idx} className="tooltip-seed">
+                                      {s.artist} — {s.title}
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
+                            </span>
                           )}
                           {track.popularityPercentile !== undefined && (
-                            <span className="mini-badge pop">{Math.round(track.popularityPercentile * 100)}{t.badgePop}</span>
+                            <span
+                              className="mini-badge pop"
+                              title={track.popularityPercentile > 0 ? undefined : t.popInsufficient}
+                            >
+                              {track.popularityPercentile > 0
+                                ? `${Math.round(track.popularityPercentile * 100)}${t.badgePop}`
+                                : "—"}
+                            </span>
                           )}
                           {track.liftScore !== undefined && (
                             <span className="mini-badge lift">+{track.liftScore.toFixed(2)} {t.badgeLift}</span>
