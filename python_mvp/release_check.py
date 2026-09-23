@@ -9,6 +9,7 @@ try:
     from .recommend import recommend
     from .build_graph import CANARIES, adjacency
     from .networks import GraphEncoder
+    from .artifacts import validate_production_range
 except ImportError:
     from config import REPORTS, write_json, fingerprint, deterministic
     from training import load_components, checkpoint, interval
@@ -16,6 +17,7 @@ except ImportError:
     from recommend import recommend
     from build_graph import CANARIES, adjacency
     from networks import GraphEncoder
+    from artifacts import validate_production_range
 
 
 def main():
@@ -29,6 +31,11 @@ def main():
     components, hashes = {}, {}
     for seed in seeds:
         components[seed] = load_components(seed, require_ranker=True)
+        taste_ckpt = torch.load(checkpoint('taste', seed), map_location='cpu', weights_only=True)
+        if taste_ckpt.get('status') == 'DIAGNOSTIC_NOT_RELEASE':
+            raise RuntimeError(f"DIAGNOSTIC_SMOKE_IN_PRODUCTION: diagnostic smoke checkpoint cannot be released for seed {seed}")
+        if 'range_config' in taste_ckpt:
+            validate_production_range(taste_ckpt['range_config'])
         hashes[str(seed)] = {stage: fingerprint(checkpoint(stage, seed)) for stage in ('graph', 'taste', 'ranker', 'shuffled')}
     target = REPORTS / f'release_{a.split}.json'
     if a.split == 'final':

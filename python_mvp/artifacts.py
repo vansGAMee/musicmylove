@@ -23,6 +23,29 @@ class RangeConfig:
         return asdict(self)
 
 
+PRODUCTION_MIN_CONFIDENCE = 0.20
+PRODUCTION_MIN_RADIUS = -0.10
+
+
+def validate_production_range(config):
+    """Diagnostic smoke configurations (e.g. confidence=0.1, radius=-0.25) are strictly prohibited in production."""
+    if isinstance(config, RangeConfig):
+        cfg = config.to_dict()
+    elif isinstance(config, dict):
+        cfg = config
+    else:
+        raise ValueError("Invalid range configuration type")
+    conf = float(cfg.get('confidence', 0.))
+    rad = float(cfg.get('radius', 0.))
+    users = int(cfg.get('min_users', 0))
+    if conf < PRODUCTION_MIN_CONFIDENCE:
+        raise RuntimeError(f"DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION: confidence {conf} < minimum production threshold {PRODUCTION_MIN_CONFIDENCE}")
+    if rad < PRODUCTION_MIN_RADIUS:
+        raise RuntimeError(f"DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION: radius {rad} < minimum production threshold {PRODUCTION_MIN_RADIUS}")
+    if users < 3:
+        raise RuntimeError(f"DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION: min_users {users} < 3")
+
+
 def contract(directory=DATA):
     directory = Path(directory)
     paths = [directory / name for name in ('dataset.json', 'split_manifest.json', 'graph.json')]

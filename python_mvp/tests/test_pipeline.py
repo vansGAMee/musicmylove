@@ -10,6 +10,17 @@ def test_range_config_rejects_unsafe_thresholds():
         RangeConfig(min_users=1)
 
 
+def test_diagnostic_smoke_range_rejected_in_production():
+    from python_mvp.artifacts import validate_production_range
+    with pytest.raises(RuntimeError, match="DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION"):
+        validate_production_range({'confidence': 0.1, 'radius': -0.25, 'min_users': 3})
+    with pytest.raises(RuntimeError, match="DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION"):
+        validate_production_range({'confidence': 0.35, 'radius': -0.25, 'min_users': 3})
+    # Production-safe range passes
+    validate_production_range({'confidence': 0.20, 'radius': 0.0, 'min_users': 3})
+    validate_production_range({'confidence': 0.35, 'radius': 0.1, 'min_users': 3})
+
+
 def test_contract_detects_graph_or_vocabulary_change(tmp_path):
     from python_mvp.artifacts import contract, validate_contract
     from python_mvp.config import write_json
