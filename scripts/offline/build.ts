@@ -54,48 +54,12 @@ const lbHistories: number[][] = source.histories
 
 const allHistories = [...lbHistories, ...webSessions];
 
-const dimension = 64;
-
-function splitmix32(seed: number) {
-  let a = (seed ^ 0xdeadbeef) | 0;
-  return function() {
-    a = (a + 0x9e3779b9) | 0;
-    let t = a ^ (a >>> 16);
-    t = Math.imul(t, 0x21f0aaad);
-    t = t ^ (t >>> 15);
-    t = Math.imul(t, 0x735a2d97);
-    return ((t ^ (t >>> 15)) >>> 0);
-  };
-}
-
-function trackRandom(id: number) {
-  const next = splitmix32(id + 1);
-  const v = Array(dimension);
-  for (let d = 0; d < dimension; d++) {
-    v[d] = (next() & 0x80000000) ? 1 : -1;
-  }
-  return v;
-}
-
-const trackIdentities = Array.from({ length: allTracks.length }, (_, i) => trackRandom(i));
-const graph: number[][] = allTracks.map(() => Array(dimension).fill(0));
 const listeners: number[] = allTracks.map(() => 0);
-
 for (let s = 0; s < allHistories.length; s++) {
   const session = allHistories[s];
-  const weight = 1 / Math.sqrt(session.length);
-  const sessionSum = Array(dimension).fill(0);
   for (const id of session) {
-    if (!graph[id]) throw new Error('Invalid history recording ID');
+    if (!allTracks[id]) throw new Error('Invalid history recording ID');
     listeners[id]++;
-    const ti = trackIdentities[id];
-    for (let d = 0; d < dimension; d++) sessionSum[d] += ti[d];
-  }
-  for (const id of session) {
-    const ti = trackIdentities[id];
-    for (let d = 0; d < dimension; d++) {
-      graph[id][d] += (sessionSum[d] - ti[d]) * weight;
-    }
   }
 }
 
@@ -112,11 +76,133 @@ for (const n of multiSortedUnique) {
   multiRunning += multiCounts.get(n)!;
 }
 
+// 4. Load learned Stage A embeddings from models/track_embeddings.npy
+let embeddingsSha256 = '';
+const embeddingsPath = process.env.TRACK_EMBEDDINGS ?? 'models/track_embeddings.npy';
+
+interface NpyData {
+  shape: number[];
+  data: Float32Array;
+}
+
+function parseNpy(buf: Buffer): NpyData {
+  if (buf[0] !== 0x93 || buf.toString('ascii', 1, 6) !== 'NUMPY') {
+    throw new Error('Not a valid .npy file');
+  }
+  const major = buf[6];
+  let headerLen = 0;
+  let offset = 8;
+  if (major === 1) {
+    headerLen = buf.readUInt16LE(8);
+    offset = 10;
+  } else {
+    headerLen = buf.readUInt32LE(8);
+    offset = 12;
+  }
+  const headerStr = buf.toString('ascii', offset, offset + headerLen);
+  const shapeMatch = headerStr.match(/'shape':\s*\(([^)]+)\)/);
+  if (!shapeMatch) throw new Error('Could not parse shape from .npy header');
+  const shape = shapeMatch[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  const dataOffset = offset + headerLen;
+  const floatCount = (buf.byteLength - dataOffset) / 4;
+  const floatArray = new Float32Array(buf.buffer, buf.byteOffset + dataOffset, floatCount);
+  return { shape, data: floatArray };
+}
+
+let npy: NpyData | undefined;
+let isDirectCatalogEmbeddings = false;
+
+try {
+  const embeddingsBuffer = await readFile(embeddingsPath);
+  embeddingsSha256 = createHash('sha256').update(embeddingsBuffer).digest('hex');
+  npy = parseNpy(embeddingsBuffer);
+  console.log(`[embeddings] Loaded learned Stage A embeddings from ${embeddingsPath}`);
+  console.log(`  Vocab: ${npy.shape[0]}, Dim: ${npy.shape[1]}, SHA256: ${embeddingsSha256}`);
+} catch {
+  // Check for catalog_embeddings.int8.bin or track_embeddings.int8.bin (Vercel deployment)
+  for (const binPath of ['models/catalog_embeddings.int8.bin', 'models/track_embeddings.int8.bin']) {
+    try {
+      const int8Buf = await readFile(binPath);
+      embeddingsSha256 = createHash('sha256').update(int8Buf).digest('hex');
+      const int8Data = new Int8Array(int8Buf.buffer, int8Buf.byteOffset, int8Buf.byteLength);
+      const dim = 64;
+      const vocab = Math.floor(int8Data.length / dim);
+      const floatData = new Float32Array(int8Data.length);
+      for (let j = 0; j < int8Data.length; j++) {
+        floatData[j] = int8Data[j] / 127.0;
+      }
+      npy = { shape: [vocab, dim], data: floatData };
+      if (binPath.includes('catalog_embeddings')) isDirectCatalogEmbeddings = true;
+      console.log(`[embeddings] Loaded learned Stage A embeddings from fallback ${binPath}`);
+      console.log(`  Vocab: ${npy.shape[0]}, Dim: ${npy.shape[1]}, SHA256: ${embeddingsSha256}`);
+      break;
+    } catch {
+      // continue to next candidate
+    }
+  }
+}
+
+// Load expanded catalog index map or catalog_indices.json to verify exact 1-to-1 row alignment
+let expandedKeyToIdx = new Map<string, number>();
+let catalogIndicesList: number[] = [];
+
+try {
+  const expRaw = await readFile('data/cache/pipeline/expanded_catalog.json', 'utf8');
+  const expCat = JSON.parse(expRaw);
+  expCat.tracks.forEach((t: { artist: string; title: string }, i: number) => {
+    expandedKeyToIdx.set(key(t), i);
+  });
+  console.log(`[alignment] Loaded expanded catalog index map (${expandedKeyToIdx.size} tracks)`);
+} catch {
+  try {
+    const idxRaw = await readFile('models/catalog_indices.json', 'utf8');
+    catalogIndicesList = JSON.parse(idxRaw);
+    console.log(`[alignment] Loaded catalog indices mapping (${catalogIndicesList.length} tracks)`);
+  } catch {
+    console.warn('[alignment] Neither expanded_catalog.json nor catalog_indices.json found; using sequential fallback');
+  }
+}
+
+const dim = npy ? npy.shape[1] : 64;
+const graph: number[][] = [];
+let matchedLearnedCount = 0;
+
+for (let i = 0; i < allTracks.length; i++) {
+  const t = allTracks[i];
+  const k = key(t);
+  let rowIdx: number | undefined;
+
+  if (isDirectCatalogEmbeddings) {
+    rowIdx = i;
+  } else if (expandedKeyToIdx.has(k)) {
+    rowIdx = expandedKeyToIdx.get(k);
+  } else if (i < catalogIndicesList.length) {
+    rowIdx = catalogIndicesList[i];
+  } else if (i < (npy?.shape[0] ?? 0)) {
+    rowIdx = i;
+  }
+
+  if (npy && rowIdx !== undefined && rowIdx < npy.shape[0]) {
+    const offset = rowIdx * dim;
+    const row = Array.from(npy.data.subarray(offset, offset + dim));
+    graph.push(row);
+    matchedLearnedCount++;
+  } else {
+    // Zero vector fallback
+    graph.push(Array(dim).fill(0));
+  }
+}
+
+console.log(`[embeddings] Matched ${matchedLearnedCount}/${allTracks.length} tracks to real learned Stage A embeddings`);
+
 const normalized = graph.map(v => unit(v).map(x => Math.round(x * 1e6) / 1e6));
 
-// 4. Load trained TasteLiftNet neural ranker weights
+// 5. Load trained TasteLiftNet neural ranker weights
 const rankerWeightsPath = 'models/tasteliftnet_weights.json';
 const neuralRanker = await readFile(rankerWeightsPath, 'utf8').then(r => JSON.parse(r)).catch(() => undefined);
+if (neuralRanker) {
+  console.log('[ranker] Loaded trained TasteLiftNet ranker weights');
+}
 
 const catalog: Catalog = {
   format: 'human-graph-v1',
@@ -141,9 +227,10 @@ const catalog: Catalog = {
   graphIndex: buildHnsw(normalized),
   context: {},
   ...(neuralRanker ? { neuralRanker } : {}),
+  ...(embeddingsSha256 ? { embeddingsSha256 } : {}),
 };
 
-// 5. Optional real audio vectors: generated by embed_audio.py or acousticbrainz_audio.py, never synthesized.
+// 6. Optional real audio vectors: generated by embed_audio.py or acousticbrainz_audio.py, never synthesized.
 const audioPath = process.env.AUDIO_VECTORS ?? (await readFile('data/cache/audio-vectors.json', 'utf8').then(() => 'data/cache/audio-vectors.json').catch(() => undefined));
 if (audioPath) {
   const a = JSON.parse(await readFile(audioPath, 'utf8'));
@@ -171,6 +258,7 @@ await writeFile('public/data/manifest.json', JSON.stringify({
   histories: allHistories.length,
   audio: catalog.audio?.ids.length ?? 0,
   hasNeuralRanker: Boolean(catalog.neuralRanker),
+  embeddingsSha256: catalog.embeddingsSha256 ?? '',
   source: catalog.source
 }));
 
@@ -179,5 +267,6 @@ console.log(JSON.stringify({
   histories: allHistories.length,
   audio: catalog.audio?.ids.length ?? 0,
   hasNeuralRanker: Boolean(catalog.neuralRanker),
+  embeddingsSha256: catalog.embeddingsSha256 ?? '',
   source: catalog.source
 }));

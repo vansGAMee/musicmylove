@@ -64,7 +64,10 @@ def train_embeddings(
     lr: float = 1e-3,
     temperature: float = 0.07,
     seed: int = 42,
-    device_str: str = None
+    device_str: str = None,
+    is_shuffled: bool = False,
+    output_name: str = "track_embeddings",
+    max_pairs: int = 1500000
 ):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -87,25 +90,54 @@ def train_embeddings(
 
     print(f"[data] Loading sessions from {sessions_path}...")
     data = json.loads((root / sessions_path).read_text())
-    sessions = data.get("sessions", [])
-    print(f"[data] Loaded {len(sessions):,} sessions")
+    
+    # Check if split_sessions format (train/val/test) or legacy format
+    if "train" in data and "val" in data:
+        train_sessions = data["train"]
+        val_sessions = data["val"]
+        print(f"[data] Detected strict held-out split: Train sessions={len(train_sessions):,}, Val sessions={len(val_sessions):,}")
+    else:
+        sessions = data.get("sessions", [])
+        split_idx = int(len(sessions) * 0.85)
+        train_sessions = sessions[:split_idx]
+        val_sessions = sessions[split_idx:]
+        print(f"[data] Fallback split: Train sessions={len(train_sessions):,}, Val sessions={len(val_sessions):,}")
+
+    if is_shuffled:
+        print("[control] Generating SHUFFLED train sessions (preserving marginal track frequency)...")
+        rng = random.Random(seed + 999)
+        tokens = [tok for s in train_sessions for tok in s]
+        rng.shuffle(tokens)
+        shuffled_train = []
+        cur = 0
+        for s in train_sessions:
+            L = len(s)
+            shuffled_train.append(tokens[cur:cur + L])
+            cur += L
+        train_sessions = shuffled_train
 
     # Determine vocab size
-    max_idx = max(max(s) for s in sessions if s)
-    vocab_size = max_idx + 1
+    all_sessions_for_vocab = train_sessions + val_sessions
+    max_idx = max(max(s) for s in all_sessions_for_vocab if s)
+    # Check catalog tracks if available for full vocab size
+    catalog_path = root / "data/cache/pipeline/expanded_catalog.json"
+    if catalog_path.exists():
+        cat_tracks = json.loads(catalog_path.read_text()).get("tracks", [])
+        vocab_size = max(len(cat_tracks), max_idx + 1)
+    else:
+        vocab_size = max_idx + 1
     print(f"[model] Track vocabulary size: {vocab_size:,}, embedding dimension: {embedding_dim}")
 
-    # Generate positive co-occurrence pairs
-    print("[data] Generating positive co-occurrence pairs (window=5)...")
-    raw_pairs = build_pairs_from_sessions(sessions, window_size=5)
-    random.shuffle(raw_pairs)
-    print(f"[data] Generated {len(raw_pairs):,} positive pairs")
+    # Generate positive co-occurrence pairs strictly from respective splits
+    print("[data] Generating train positive pairs (window=5) strictly from TRAIN sessions...")
+    train_pairs = build_pairs_from_sessions(train_sessions, window_size=5, max_pairs=max_pairs)
+    random.shuffle(train_pairs)
 
-    # Train / Validation split (85% train, 15% validation)
-    split_idx = int(len(raw_pairs) * 0.85)
-    train_pairs = raw_pairs[:split_idx]
-    val_pairs = raw_pairs[split_idx:]
-    print(f"[data] Train pairs: {len(train_pairs):,}, Validation pairs: {len(val_pairs):,}")
+    print("[data] Generating val positive pairs (window=5) strictly from VAL sessions...")
+    val_pairs = build_pairs_from_sessions(val_sessions, window_size=5, max_pairs=100000)
+    random.shuffle(val_pairs)
+
+    print(f"[data] Non-leaking dataset: Train pairs={len(train_pairs):,}, Validation pairs={len(val_pairs):,}")
 
     model = TrackEmbeddingModel(vocab_size, embedding_dim, seed=seed).to(device)
     initial_weights_sample = model.embeddings.weight.data[:5, :5].clone().cpu().numpy().tolist()
@@ -127,8 +159,6 @@ def train_embeddings(
                 target_emb = model(targets)    # [B, d]
                 context_emb = model(contexts)  # [B, d]
 
-                # InfoNCE with in-batch negatives:
-                # Sim matrix: [B, B]
                 sim = torch.matmul(target_emb, context_emb.T) / temperature
                 labels = torch.arange(len(batch), dtype=torch.long, device=device)
                 loss = F.cross_entropy(sim, labels)
@@ -200,13 +230,14 @@ def train_embeddings(
 
     # Save learned embeddings as numpy array and JSON metadata
     all_embeddings = F.normalize(model.embeddings.weight.data, p=2, dim=-1).cpu().numpy().astype(np.float32)
-    np.save(out / "track_embeddings.npy", all_embeddings)
+    np.save(out / f"{output_name}.npy", all_embeddings)
 
     report = {
-        "stage": "Stage A: Learned Track Embeddings (InfoNCE)",
+        "stage": f"Stage A: Learned Track Embeddings ({'Shuffled Control' if is_shuffled else 'Real Human'})",
         "vocab_size": vocab_size,
         "embedding_dim": embedding_dim,
         "seed": seed,
+        "is_shuffled": is_shuffled,
         "epochs": epochs,
         "device": str(device),
         "runtime_sec": round(dt, 2),
@@ -218,15 +249,33 @@ def train_embeddings(
         "weights_sample_after": final_weights_sample,
         "weights_updated_verified": initial_weights_sample != final_weights_sample,
     }
-    (out / "embeddings_report.json").write_text(json.dumps(report, indent=2))
-    print("[output] Saved learned embeddings and report to", out)
+    report_name = f"{output_name}_report.json" if is_shuffled else "embeddings_report.json"
+    (out / report_name).write_text(json.dumps(report, indent=2))
+    print(f"[output] Saved learned embeddings to {out / (output_name + '.npy')} and report to {out / report_name}")
     return report
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sessions", default="data/cache/pipeline/expanded_sessions.json")
+    parser.add_argument("--sessions", default="data/cache/pipeline/split_sessions.json")
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--dim", type=int, default=64)
+    parser.add_argument("--pairs", type=int, default=1500000)
+    parser.add_argument("--shuffled", action="store_true", help="Train shuffled control model")
     args = parser.parse_args()
-    train_embeddings(sessions_path=args.sessions, epochs=args.epochs, batch_size=args.batch_size, embedding_dim=args.dim)
+    
+    # Check if split_sessions exists, otherwise fallback to expanded_sessions
+    sess_path = args.sessions
+    if not (Path(__file__).resolve().parents[1] / sess_path).exists():
+        sess_path = "data/cache/pipeline/expanded_sessions.json"
+        
+    out_name = "shuffled_track_embeddings" if args.shuffled else "track_embeddings"
+    train_embeddings(
+        sessions_path=sess_path,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        embedding_dim=args.dim,
+        max_pairs=args.pairs,
+        is_shuffled=args.shuffled,
+        output_name=out_name
+    )

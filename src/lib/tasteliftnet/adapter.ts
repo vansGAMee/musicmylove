@@ -24,9 +24,9 @@ export function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
-export function dot(a: readonly number[], b: readonly number[]): number {
+export function dot(a: ArrayLike<number>, b: ArrayLike<number>): number {
   let s = 0;
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) s += a[i] * (b[i] ?? 0);
   return s;
 }
 
@@ -36,7 +36,7 @@ export function dot(a: readonly number[], b: readonly number[]): number {
  */
 export function scoreWithAdapter(
   baseScore: number,
-  candidateEmbedding: readonly number[],
+  candidateEmbedding: ArrayLike<number>,
   adapter: AdapterState
 ): number {
   const userDot = dot(candidateEmbedding, adapter.weights);
@@ -51,7 +51,7 @@ export function scoreWithAdapter(
  */
 export function applyFeedbackGradient(
   adapter: AdapterState,
-  candidateEmbedding: readonly number[],
+  candidateEmbedding: ArrayLike<number>,
   feedback: 'like' | 'dislike',
   baseScore: number = 0
 ): {
@@ -72,7 +72,7 @@ export function applyFeedbackGradient(
 
   // Analytical gradient: (p - y) * c
   const gradScalar = p - y;
-  const gradient = candidateEmbedding.map(c => gradScalar * c);
+  const gradient = Array.from(candidateEmbedding).map(c => gradScalar * c);
 
   const weightsBefore = [...adapter.weights];
 

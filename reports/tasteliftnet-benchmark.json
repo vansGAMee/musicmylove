@@ -1,83 +1,167 @@
 {
-  "model": "CURRENT_BASELINE (human-graph-v1 heuristic)",
+  "model": "TasteLiftNet (Stage A Learned Embeddings + Stage B Multi-Head Ranker)",
   "partition": "test",
-  "evaluatedDate": "2026-09-22T20:38:35.471Z",
+  "evaluatedDate": "2026-09-23T03:58:17.782Z",
   "catalogStats": {
     "totalTracks": 45226,
     "totalArtists": 16407,
-    "catalogByteSize": 40209030
+    "catalogByteSize": 40837243,
+    "embeddingsSha256": "46b21550df6a39f12b9ca9c96677ccf90ed1be4f2f080cd68e4c214128b3d128"
   },
   "globalCoverageAcrossProtocols": {
-    "uniqueRecommendedTracks": 7171,
-    "catalogCoverageRatio": 0.1585592358377924,
-    "uniqueRecommendedArtists": 3933,
-    "artistCoverageRatio": 0.2397147558968733
+    "uniqueRecommendedTracks": 1948,
+    "catalogCoverageRatio": 0.043072568876310086,
+    "uniqueRecommendedArtists": 871,
+    "artistCoverageRatio": 0.053087096970805145
   },
-  "protocols": {
-    "1_to_rest": {
-      "numEvaluatedSessions": 106,
-      "recallAt10": 0.09796701017913349,
-      "recallAt40": 0.3361504717225953,
-      "mrrAt40": 0.850442189454398,
-      "ndcgAt10": 0.7716141698780749,
-      "ndcgAt40": 0.7099623068518083,
-      "rPrecision": 0.6829203661999094,
-      "longTailRecallAt40": 0.38759025598945457,
-      "longTailNdcgAt40": 0.6640532741118925,
-      "avgLatencyMs": 46.103031018867966,
-      "avgCandidatePoolSize": 2037.1132075471698
-    },
-    "5_to_rest": {
-      "numEvaluatedSessions": 106,
-      "recallAt10": 0.13920614821188573,
-      "recallAt40": 0.4546949426247253,
-      "mrrAt40": 0.9937106918238994,
-      "ndcgAt10": 0.9751664829965409,
-      "ndcgAt40": 0.9056726777987923,
-      "rPrecision": 0.8748394670589236,
-      "longTailRecallAt40": 0.5191115429817034,
-      "longTailNdcgAt40": 0.8431267224424479,
-      "avgLatencyMs": 51.61749291509429,
-      "avgCandidatePoolSize": 2137.0377358490564
-    },
-    "10_to_rest": {
-      "numEvaluatedSessions": 106,
-      "recallAt10": 0.1649960321736199,
-      "recallAt40": 0.4863457256862436,
-      "mrrAt40": 0.9952830188679245,
-      "ndcgAt10": 0.9885207240415677,
-      "ndcgAt40": 0.9152972817058398,
-      "rPrecision": 0.8848682240191673,
-      "longTailRecallAt40": 0.5577580886073177,
-      "longTailNdcgAt40": 0.8545988230779367,
-      "avgLatencyMs": 57.207164858490735,
-      "avgCandidatePoolSize": 2222.198113207547
-    },
-    "30_70": {
-      "numEvaluatedSessions": 106,
-      "recallAt10": 0.18478473773174398,
-      "recallAt40": 0.5663306539689694,
-      "mrrAt40": 0.9952830188679245,
-      "ndcgAt10": 0.9846604555789505,
-      "ndcgAt40": 0.8849333609252,
-      "rPrecision": 0.8420659878207047,
-      "longTailRecallAt40": 0.6287344766247437,
-      "longTailNdcgAt40": 0.815689208031338,
-      "avgLatencyMs": 68.32148629245283,
-      "avgCandidatePoolSize": 2320.3396226415093
-    },
-    "70_30": {
-      "numEvaluatedSessions": 106,
-      "recallAt10": 0.40171306806338336,
-      "recallAt40": 0.7537934936253934,
-      "mrrAt40": 0.9905660377358491,
-      "ndcgAt10": 0.970533451199569,
-      "ndcgAt40": 0.8197759461220487,
-      "rPrecision": 0.7395059392678978,
-      "longTailRecallAt40": 0.7731106673118965,
-      "longTailNdcgAt40": 0.812719693645419,
-      "avgLatencyMs": 93.48443420754724,
-      "avgCandidatePoolSize": 2379.5943396226417
+  "intersection_benchmark": {
+    "description": "Benchmark A: Evaluated strictly on human hidden tracks present in catalog vocabulary",
+    "protocols": {
+      "1_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.08998798519741745,
+        "recallAt10": 0.005182438280392835,
+        "recallAt40": 0.010284153541845191,
+        "mrrAt40": 0.10736959378896849,
+        "ndcgAt10": 0.04205615977099571,
+        "ndcgAt40": 0.026544020916430835,
+        "rPrecision": 0.020096822244289967,
+        "longTailRecallAt40": 0.0033497402242275084,
+        "longTailNdcgAt40": 0.0016010397202440773,
+        "avgLatencyMs": 70.98021584905658,
+        "avgCandidatePoolSize": 2038.6132075471698
+      },
+      "5_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.1377427117792975,
+        "recallAt10": 0.00669466080565401,
+        "recallAt40": 0.01440085348391651,
+        "mrrAt40": 0.14436026638195693,
+        "ndcgAt10": 0.06207196125550467,
+        "ndcgAt40": 0.03813584766880395,
+        "rPrecision": 0.029009433962264145,
+        "longTailRecallAt40": 0,
+        "longTailNdcgAt40": 0,
+        "avgLatencyMs": 74.21219034905668,
+        "avgCandidatePoolSize": 2136.9150943396226
+      },
+      "10_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.15709845145729395,
+        "recallAt10": 0.01112390689796262,
+        "recallAt40": 0.01874694755022979,
+        "mrrAt40": 0.15557198221961777,
+        "ndcgAt10": 0.07815436706246665,
+        "ndcgAt40": 0.04521848264198262,
+        "rPrecision": 0.03490566037735849,
+        "longTailRecallAt40": 0.00014974543276430067,
+        "longTailNdcgAt40": 0.00036633075658885076,
+        "avgLatencyMs": 78.68237792452875,
+        "avgCandidatePoolSize": 2218.943396226415
+      },
+      "30_70": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.18671755294845435,
+        "recallAt10": 0.011133870956085756,
+        "recallAt40": 0.024233551301501847,
+        "mrrAt40": 0.15061889242283608,
+        "ndcgAt10": 0.07022446428054455,
+        "ndcgAt40": 0.045545537431787894,
+        "rPrecision": 0.03534366576819406,
+        "longTailRecallAt40": 0.00044480304534922206,
+        "longTailNdcgAt40": 0.00036821483409593355,
+        "avgLatencyMs": 87.44966489622648,
+        "avgCandidatePoolSize": 2301.896226415094
+      },
+      "70_30": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.19754541864439742,
+        "recallAt10": 0.020392672786098714,
+        "recallAt40": 0.028953798781950747,
+        "mrrAt40": 0.11089206552444864,
+        "ndcgAt10": 0.05279740341655922,
+        "ndcgAt40": 0.035513717637914485,
+        "rPrecision": 0.02482561841271637,
+        "longTailRecallAt40": 0.0008218982275586049,
+        "longTailNdcgAt40": 0.0005063722024486832,
+        "avgLatencyMs": 102.24124389622581,
+        "avgCandidatePoolSize": 2346.0377358490564
+      }
+    }
+  },
+  "full_coverage_benchmark": {
+    "description": "Benchmark B: Evaluated on all human hidden tracks (testing broad discovery & long-tail coverage)",
+    "protocols": {
+      "1_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.08998798519741745,
+        "recallAt10": 0.005182438280392835,
+        "recallAt40": 0.010284153541845191,
+        "mrrAt40": 0.10736959378896849,
+        "ndcgAt10": 0.04205615977099571,
+        "ndcgAt40": 0.026544020916430835,
+        "rPrecision": 0.020096822244289967,
+        "longTailRecallAt40": 0.0033497402242275084,
+        "longTailNdcgAt40": 0.0016010397202440773,
+        "avgLatencyMs": 70.98021584905658,
+        "avgCandidatePoolSize": 2038.6132075471698
+      },
+      "5_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.1377427117792975,
+        "recallAt10": 0.00669466080565401,
+        "recallAt40": 0.01440085348391651,
+        "mrrAt40": 0.14436026638195693,
+        "ndcgAt10": 0.06207196125550467,
+        "ndcgAt40": 0.03813584766880395,
+        "rPrecision": 0.029009433962264145,
+        "longTailRecallAt40": 0,
+        "longTailNdcgAt40": 0,
+        "avgLatencyMs": 74.21219034905668,
+        "avgCandidatePoolSize": 2136.9150943396226
+      },
+      "10_to_rest": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.15709845145729395,
+        "recallAt10": 0.01112390689796262,
+        "recallAt40": 0.01874694755022979,
+        "mrrAt40": 0.15557198221961777,
+        "ndcgAt10": 0.07815436706246665,
+        "ndcgAt40": 0.04521848264198262,
+        "rPrecision": 0.03490566037735849,
+        "longTailRecallAt40": 0.00014974543276430067,
+        "longTailNdcgAt40": 0.00036633075658885076,
+        "avgLatencyMs": 78.68237792452875,
+        "avgCandidatePoolSize": 2218.943396226415
+      },
+      "30_70": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.18671755294845435,
+        "recallAt10": 0.011133870956085756,
+        "recallAt40": 0.024233551301501847,
+        "mrrAt40": 0.15061889242283608,
+        "ndcgAt10": 0.07022446428054455,
+        "ndcgAt40": 0.045545537431787894,
+        "rPrecision": 0.03534366576819406,
+        "longTailRecallAt40": 0.00044480304534922206,
+        "longTailNdcgAt40": 0.00036821483409593355,
+        "avgLatencyMs": 87.44966489622648,
+        "avgCandidatePoolSize": 2301.896226415094
+      },
+      "70_30": {
+        "numEvaluatedSessions": 106,
+        "candidateRecallAt2000": 0.19754541864439742,
+        "recallAt10": 0.020392672786098714,
+        "recallAt40": 0.028953798781950747,
+        "mrrAt40": 0.11089206552444864,
+        "ndcgAt10": 0.05279740341655922,
+        "ndcgAt40": 0.035513717637914485,
+        "rPrecision": 0.02482561841271637,
+        "longTailRecallAt40": 0.0008218982275586049,
+        "longTailNdcgAt40": 0.0005063722024486832,
+        "avgLatencyMs": 102.24124389622581,
+        "avgCandidatePoolSize": 2346.0377358490564
+      }
     }
   }
 }

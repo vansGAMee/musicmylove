@@ -174,13 +174,28 @@ def main():
         raw_listens_count += 1
         unique_users.add(p["user"])
 
-    # 4. Session Segmentation & Filtering
-    print("\n[processing] Segmenting listens into sessions (gap = %ds)..." % args.session_gap_sec)
-    all_sessions = []
+    # 4. Session Segmentation & Filtering with Strict Held-Out User Partitioning
+    print("\n[processing] Segmenting listens into sessions (gap = %ds) with strict held-out user splits..." % args.session_gap_sec)
+    
+    def get_split(context_id: str, salt: str = "split_salt_v2026") -> str:
+        h = int(hashlib.sha256(f"{salt}_{context_id}".encode()).hexdigest(), 16) % 100
+        if h < 80:
+            return "train"
+        elif h < 90:
+            return "val"
+        else:
+            return "test"
+
+    split_user_counts = {"train": 0, "val": 0, "test": 0}
+    for u in unique_users:
+        split_user_counts[get_split(u)] += 1
+
+    print(f"[splits] Unique human users partitioning: Train={split_user_counts['train']:,}, Val={split_user_counts['val']:,}, Test={split_user_counts['test']:,}")
+
+    split_raw_sessions = {"train": [], "val": [], "test": []}
     track_frequency = defaultdict(int)
     track_users = defaultdict(set)
     track_sessions = defaultdict(int)
-
     track_registry = {}  # key -> {artist, title, mbid}
 
     # Pre-seed with existing catalog tracks to ensure 100% preservation
@@ -197,6 +212,7 @@ def main():
                 }
 
     for user, listens in user_listens.items():
+        user_split = get_split(user)
         listens.sort(key=lambda x: x["ts"])
         current_session = []
         last_ts = 0
@@ -216,7 +232,7 @@ def main():
 
             if last_ts > 0 and (item["ts"] - last_ts) > args.session_gap_sec:
                 if len(current_session) >= 2:
-                    all_sessions.append(current_session)
+                    split_raw_sessions[user_split].append(current_session)
                 current_session = []
 
             # Dedup adjacent trackplays in session
@@ -225,28 +241,30 @@ def main():
             last_ts = item["ts"]
 
         if len(current_session) >= 2:
-            all_sessions.append(current_session)
+            split_raw_sessions[user_split].append(current_session)
 
-    # Filter spam sessions (e.g. repetition > 80% same artist)
-    valid_sessions = []
-    for s in all_sessions:
-        if len(s) < 2 or len(s) > 150:
-            continue
-        artists = [k.split("\x1f")[0] for k in s]
-        most_common_artist_count = max(artists.count(a) for a in set(artists))
-        if most_common_artist_count / len(s) > 0.85 and len(s) > 3:
-            continue  # single-artist looping spam
-        valid_sessions.append(s)
-        s_set = set(s)
-        for k in s_set:
-            track_sessions[k] += 1
-            track_frequency[k] += 1
+    # Filter spam sessions (e.g. repetition > 85% same artist) per split
+    split_valid_sessions = {"train": [], "val": [], "test": []}
+    for s_name in ["train", "val", "test"]:
+        for s in split_raw_sessions[s_name]:
+            if len(s) < 2 or len(s) > 150:
+                continue
+            artists = [k.split("\x1f")[0] for k in s]
+            most_common_artist_count = max(artists.count(a) for a in set(artists))
+            if most_common_artist_count / len(s) > 0.85 and len(s) > 3:
+                continue  # single-artist looping spam
+            split_valid_sessions[s_name].append(s)
+            for k in set(s):
+                track_sessions[k] += 1
+                track_frequency[k] += 1
 
-    # Ingest existing web tracklists
+    # Ingest existing web tracklists with independent context partitioning
     web_tracklists_path = root / "data/cache/web-tracklists.json"
     if web_tracklists_path.exists():
         web_lists = json.loads(web_tracklists_path.read_text())
         for w in web_lists:
+            w_url = w.get("url", "")
+            w_split = get_split(w_url, salt="web_split_salt_v2026")
             w_tracks = w.get("tracks", [])
             w_session = []
             for t in w_tracks:
@@ -259,7 +277,7 @@ def main():
                     }
                 w_session.append(k)
             if len(w_session) >= 2:
-                valid_sessions.append(w_session)
+                split_valid_sessions[w_split].append(w_session)
                 for k in set(w_session):
                     track_sessions[k] += 1
                     track_frequency[k] += 1
@@ -288,12 +306,15 @@ def main():
             "sessions": track_sessions[k],
         })
 
-    # Convert valid_sessions to integer indices
-    indexed_sessions = []
-    for s in valid_sessions:
-        indices = [key_to_idx[k] for k in s if k in key_to_idx]
-        if len(set(indices)) >= 2:
-            indexed_sessions.append(indices)
+    # Convert split sessions to integer indices
+    split_indexed_sessions = {"train": [], "val": [], "test": []}
+    all_indexed_sessions = []
+    for s_name in ["train", "val", "test"]:
+        for s in split_valid_sessions[s_name]:
+            indices = [key_to_idx[k] for k in s if k in key_to_idx]
+            if len(set(indices)) >= 2:
+                split_indexed_sessions[s_name].append(indices)
+                all_indexed_sessions.append(indices)
 
     dt = time.time() - t0
 
@@ -317,23 +338,33 @@ def main():
         "kexp_radio": {
             "plays_extracted": len(kexp_plays),
         },
+        "splits": {
+            "users": split_user_counts,
+            "sessions": {
+                "train": len(split_indexed_sessions["train"]),
+                "val": len(split_indexed_sessions["val"]),
+                "test": len(split_indexed_sessions["test"]),
+            }
+        },
         "summary": {
             "total_raw_listens": raw_listens_count,
             "total_unique_users": len(unique_users),
-            "total_segmented_sessions": len(valid_sessions),
+            "total_segmented_sessions": len(all_indexed_sessions),
             "total_resolved_tracks": len(catalog_tracks),
             "pipeline_runtime_sec": round(dt, 2),
         }
     }
 
     # Save outputs
-    print(f"\n[saving] Writing catalog and sessions to {out_dir}...")
+    print(f"\n[saving] Writing catalog, split sessions, and report to {out_dir}...")
     (out_dir / "expanded_catalog.json").write_text(json.dumps({"tracks": catalog_tracks}, indent=2))
-    (out_dir / "expanded_sessions.json").write_text(json.dumps({"sessions": indexed_sessions}))
+    (out_dir / "split_sessions.json").write_text(json.dumps(split_indexed_sessions))
+    (out_dir / "expanded_sessions.json").write_text(json.dumps({"sessions": all_indexed_sessions}))
     (out_dir / "ingest_report.json").write_text(json.dumps(report, indent=2))
 
     print("==================================================")
     print("Ingest Completed Successfully in %.2fs!" % dt)
+    print(f"Splits: Train sessions={len(split_indexed_sessions['train']):,}, Val={len(split_indexed_sessions['val']):,}, Test={len(split_indexed_sessions['test']):,}")
     print(json.dumps(report, indent=2))
     print("==================================================")
 

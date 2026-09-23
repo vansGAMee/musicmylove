@@ -1,4 +1,5 @@
 import { dot, unit, searchHnsw, type Hnsw } from './hnsw';
+import { createAdapter, applyFeedbackGradient, scoreWithAdapter } from '../tasteliftnet/adapter';
 import type { Track } from '../types';
 
 export type Song = Pick<Track, 'artist' | 'title'>;
@@ -23,16 +24,18 @@ export interface Catalog {
   format: 'human-graph-v1';
   source: string;
   tracks: (Track & { popularity: number })[];
-  graph: number[][];
+  graph: (number[] | Float32Array)[];
+  embeddings?: Float32Array | Int8Array;
   graphIndex: Hnsw;
   audio?: { ids: string[]; vectors: number[][]; index: Hnsw; encoder: string };
   context: Record<string, Context>;
   neuralRanker?: NeuralRankerWeights;
+  embeddingsSha256?: string;
 }
 
 export const key = (s: Song) => [s.artist, s.title].map(x => x.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()).join('\u001f');
 
-interface Seed { track: Song; id?: number; graph?: number[]; audio?: number[] }
+interface Seed { track: Song; id?: number; graph?: readonly number[] | Float32Array; audio?: number[] }
 
 const cache = new WeakMap<Catalog, { ids: Map<string, number>; keys: Map<string, number>; audio: Map<string, number> }>();
 function maps(c: Catalog) {
@@ -56,8 +59,16 @@ export function missing(c: Catalog, songs: Song[]): Song[] {
   return [...new Map(songs.filter(s => !m.keys.has(key(s)) && !c.context[key(s)]).map(s => [key(s), s])).values()].sort((a, b) => key(a) < key(b) ? -1 : 1);
 }
 
-function mean(vs: number[][]) {
-  return unit(vs[0].map((_, i) => vs.reduce((n, v) => n + v[i], 0) / vs.length));
+function mean(vs: (readonly number[] | Float32Array)[]) {
+  const len = vs.length;
+  const dim = vs[0].length;
+  const res = new Array(dim).fill(0);
+  for (let i = 0; i < len; i++) {
+    const v = vs[i];
+    for (let d = 0; d < dim; d++) res[d] += v[d];
+  }
+  for (let d = 0; d < dim; d++) res[d] /= len;
+  return unit(res);
 }
 
 function gelu(x: number): number {
@@ -103,10 +114,10 @@ function evaluateNeuralMlp(input: number[], w: NeuralRankerWeights): number {
   return logit;
 }
 
-function heads(vectors: number[][]): number[][] {
+function heads(vectors: (readonly number[] | Float32Array)[]): number[][] {
   if (!vectors.length) return [];
   const count = Math.min(vectors.length, 12, Math.max(2, Math.ceil(Math.sqrt(vectors.length))));
-  let centers = [vectors[0]];
+  let centers = [Array.from(vectors[0])];
   while (centers.length < count) {
     let best = -1, idx = -1;
     vectors.forEach((v, i) => {
@@ -114,10 +125,10 @@ function heads(vectors: number[][]): number[][] {
       if (d > best) { best = d; idx = i; }
     });
     if (best < 1e-7) break;
-    centers.push(vectors[idx]);
+    centers.push(Array.from(vectors[idx]));
   }
   for (let iteration = 0; iteration < 4; iteration++) {
-    const groups: number[][][] = centers.map(() => []);
+    const groups: (readonly number[] | Float32Array)[][] = centers.map(() => []);
     for (const v of vectors) {
       let best = 0;
       for (let i = 1; i < centers.length; i++) if (dot(v, centers[i]) > dot(v, centers[best])) best = i;
@@ -204,7 +215,16 @@ export function recommend(c: Catalog, songs: Song[], feedback: Feedback, context
       }
     }
 
-    // 4. Neural Candidate Scoring
+    // 4. Personal preference adapter with exact analytical gradient descent (Requirement 4)
+    const userAdapter = createAdapter(64, 0.1);
+    for (const [mid, type] of Object.entries(feedback)) {
+      const tid = m.ids.get(mid);
+      if (tid !== undefined && c.graph[tid]) {
+        applyFeedbackGradient(userAdapter, c.graph[tid], type as 'like' | 'dislike', 0);
+      }
+    }
+
+    // 5. Neural Candidate Scoring
     const scoredCandidates = [...candidates.keys()].flatMap(id => {
       const t = c.tracks[id];
       if (excluded.has(key(t)) || feedback[t.mbid] === 'dislike') return [];
@@ -238,30 +258,16 @@ export function recommend(c: Catalog, songs: Song[], feedback: Feedback, context
         sessionFeat
       ];
 
+      // Pure TasteLiftNet neural forward pass (Requirement 3)
       const neuralLogit = evaluateNeuralMlp(fused, nr);
 
-      const g = Math.max(0, ...dots);
+      // Personal preference adapter modifies neural inference directly:
+      // s_final = neuralLogit + c^T * theta_user
+      const finalScore = scoreWithAdapter(neuralLogit, candVec, userAdapter);
+
       const strongestTasteHead = Math.max(0, dots.indexOf(maxDot));
       const seedSims = seeds.flatMap(s => s.graph ? [{ track: s.track, sim: dot(s.graph, candVec) }] : []);
-      const topInHead = seedSims.sort((a, b) => b.sim - a.sim).slice(0, 3);
-      const inHeadRelevance = topInHead.length ? topInHead.reduce((acc, x) => acc + Math.max(0, x.sim), 0) / topInHead.length : g;
-      const rawAffinity = 0.50 * g + 0.50 * inHeadRelevance;
-      const calibratedAffinity = 0.60 * rawAffinity + 0.40 * Math.min(1.0, rawAffinity / 0.8);
-
       const inHeadSupport = seedSims.filter(x => x.sim > 0.15).length;
-      const supportBonus = 0.06 * (inHeadSupport / Math.max(1, seeds.length));
-
-      const sound = (c.audio && ai !== undefined) ? Math.max(0, acousticSim) : undefined;
-      const tasteScore = sound === undefined ? calibratedAffinity : 0.70 * calibratedAffinity + 0.30 * sound;
-      const rare = Math.max(0, tasteScore * (1 - pop));
-
-      let userShift = 0.0;
-      for (const posId of positive) {
-        userShift += 0.05 * Math.max(0, dot(c.graph[posId], candVec));
-      }
-
-      const neuralBoost = Math.max(-0.15, Math.min(0.15, neuralLogit * 0.08));
-      const finalScore = tasteScore + neuralBoost + supportBonus + 0.03 * rare - 0.02 * pop + userShift;
 
       return [{
         ...t,
@@ -270,7 +276,7 @@ export function recommend(c: Catalog, songs: Song[], feedback: Feedback, context
         seedSupport: inHeadSupport,
         supportingSeeds: seeds.slice(0, 3).map(s => ({ artist: s.track.artist, title: s.track.title })),
         popularityPercentile: pop,
-        noveltyLiftScore: rare,
+        noveltyLiftScore: Math.max(0, 1.0 - pop),
         spotifyLink: `https://open.spotify.com/search/${encodeURIComponent(t.artist + ' ' + t.title)}`
       }];
     }).sort((a, b) => b.score - a.score || (a.mbid < b.mbid ? -1 : 1));
@@ -298,7 +304,8 @@ export function recommend(c: Catalog, songs: Song[], feedback: Feedback, context
         graph: seeds.filter(s => s.graph).length,
         audio: seeds.filter(s => s.audio).length
       },
-      candidateCount: candidates.size
+      candidateCount: candidates.size,
+      candidateIds: Array.from(candidates.keys())
     };
   }
 
@@ -345,5 +352,5 @@ export function recommend(c: Catalog, songs: Song[], feedback: Feedback, context
   }).sort((a, b) => b.score - a.score || (a.mbid < b.mbid ? -1 : 1));
   const seen = new Set<string>(), artists = new Map<string, number>();
   const recommendations = pool.filter(t => { const a = t.artist.toLowerCase(), k = key(t); if (seen.has(k) || (artists.get(a) ?? 0) >= 2) return false; seen.add(k); artists.set(a, (artists.get(a) ?? 0) + 1); return true; }).slice(0, 40);
-  return { recommendations, seeds: seeds.map(s => ({ input: s.track, status: s.graph || s.audio ? 'resolved' : 'unresolved', track: s.id === undefined ? undefined : c.tracks[s.id] })), coverage: { total: seeds.length, graph: seeds.filter(s => s.graph).length, audio: seeds.filter(s => s.audio).length }, candidateCount: candidates.size };
+  return { recommendations, seeds: seeds.map(s => ({ input: s.track, status: s.graph || s.audio ? 'resolved' : 'unresolved', track: s.id === undefined ? undefined : c.tracks[s.id] })), coverage: { total: seeds.length, graph: seeds.filter(s => s.graph).length, audio: seeds.filter(s => s.audio).length }, candidateCount: candidates.size, candidateIds: Array.from(candidates.keys()) };
 }

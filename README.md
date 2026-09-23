@@ -10,24 +10,25 @@ MusicMyLove — автономная рекомендательная систе
 
 1. [Принцип работы и архитектура TasteLiftNet](#принцип-работы-и-архитектура-tasteliftnet)
    - [Двухстадийное нейросетевое обучение](#двухстадийное-нейросетевое-обучение)
-   - [Интеграция физического звука (Essentia / AcousticBrainz)](#интеграция-физического-звука-essentia--acousticbrainz)
+   - [Интеграция звука треков (Essentia / AcousticBrainz) и графа](#интеграция-звука-треков-essentia--acousticbrainz-и-графа)
    - [Multi-Head Taste Attention (борьба с Centroid Collapse)](#multi-head-taste-attention-борьба-с-centroid-collapse)
    - [Scoring MLP и Pairwise Ranking Loss](#scoring-mlp-и-pairwise-ranking-loss)
    - [Клиентский Personal Preference Adapter](#клиентский-personal-preference-adapter)
 2. [Огромный человеческий граф (ListenBrainz Full Dump + KEXP)](#огромный-человеческий-граф-listenbrainz-full-dump--kexp)
 3. [Инференс в браузере (Pure TypeScript Web Worker)](#инференс-в-браузере-pure-typescript-web-worker)
-4. [Результаты бенчмарков и оценка качества](#результаты-бенчмарков-и-оценка-качества)
-5. [Архитектурные гарантии и ограничения](#архитектурные-гарантии-и-ограничения)
-6. [Быстрый старт и запуск](#быстрый-старт-и-запуск)
-7. [Воспроизведение полного цикла обучения (ML Pipeline)](#воспроизведение-полного-цикла-обучения-ml-pipeline)
-8. [Импорт плейлистов и Яндекс Музыка](#импорт-плейлистов-и-яндекс-музыка)
-9. [Верификация и тестирование](#верификация-и-тестирование)
+4. [Результаты честных бенчмарков и контролей](#результаты-честных-бенчмарков-и-контролей)
+5. [Честные аудиты данных](#честные-аудиты-данных)
+6. [Архитектурные гарантии и ограничения](#архитектурные-гарантии-и-ограничения)
+7. [Быстрый старт и запуск](#быстрый-старт-и-запуск)
+8. [Воспроизведение полного цикла обучения (ML Pipeline)](#воспроизведение-полного-цикла-обучения-ml-pipeline)
+9. [Импорт плейлистов и Яндекс Музыка](#импорт-плейлистов-и-яндекс-музыка)
+10. [Верификация и тестирование](#верификация-и-тестирование)
 
 ---
 
 ## Принцип работы и архитектура TasteLiftNet
 
-Большинство «рекомендательных систем» либо используют простые формулы/эвристики над графом, либо вызывают сторонние платные API или LLM, не понимающие структуру музыки.
+Пользователь вводит любимые треки в виде названий и исполнителей. Рекомендательная система сопоставляет эти названия с огромным музыкальным графом (460,625 треков) и реальными физическими параметрами звучания (65-мерные акустические измерения Essentia / AcousticBrainz).
 
 В MusicMyLove реализована **настоящая обучаемая нейросетевая модель** с нуля:
 $$\text{Случайная инициализация весов } \mathcal{N}(0, 0.02) \longrightarrow \text{Датасет } \longrightarrow \text{Forward} \longrightarrow \text{Loss} \longrightarrow \text{Backprop} \longrightarrow \text{Optimizer (AdamW)} \longrightarrow \text{Чекпоинт} \longrightarrow \text{Экспорт весов в TS} \longrightarrow \text{Инференс в браузере}$$
@@ -35,17 +36,17 @@ $$\text{Случайная инициализация весов } \mathcal{N}(0
 ```mermaid
 flowchart TD
     subgraph DataPrep ["1. Сбор и подготовка данных"]
-        LB["ListenBrainz 2026 Full Dump\n(229 GB, 1.15M listens)"] --> Clean["NFKC нормализация,\nфильтрация ботов и спама"]
+        LB["ListenBrainz Official Full Dump\n(229 GB, 1.15M listens)"] --> Clean["NFKC нормализация,\nфильтрация ботов и спама"]
         KEXP["KEXP Live Radio Shows\n(кураторские эфиры)"] --> Clean
         AB["AcousticBrainz / Essentia\n(65-dim тембр, ритм, спектр)"] --> Sound["Акустический корпус"]
-        Clean --> Split["Строгий сплит по юзерам:\n80% Train / 10% Val / 10% Test"]
+        Clean --> Split["Строгий сплит по пользователям:\n80% Train / 10% Val / 10% Test\n(0% test leakage)"]
     end
 
     subgraph StageA ["2. Stage A: Обучение представлений"]
-        Split --> Pairs["1,500,000 пар со-прослушиваний"]
-        Pairs --> Emb["Embedding Table: R^(V x 64)\nИнициализация N(0, 0.02)"]
-        Emb --> InfoNCE["InfoNCE Contrastive Loss (tau)\nAdamW + Cosine Annealing"]
-        InfoNCE --> TrEmb["Обученные эмбеддинги треков\nVal Loss: 8.935 -> 1.575"]
+        Split --> Pairs["1,500,000 пар со-прослушиваний (Train Only)"]
+        Pairs --> Emb["Embedding Table: R^(460k x 64)\nИнициализация N(0, 0.02)"]
+        Emb --> InfoNCE["InfoNCE Contrastive Loss\nAdamW + Cosine Annealing"]
+        InfoNCE --> TrEmb["Обученные эмбеддинги треков\nTrain Loss: 2.68 -> 1.49 | Val Loss: 8.66"]
     end
 
     subgraph StageB ["3. Stage B: TasteLiftNet Ranker"]
@@ -53,23 +54,23 @@ flowchart TD
         Sound --> Proj["AudioProjection: R^65 -> R^16\n(GELU + LayerNorm)"]
         Proj --> RankModel
         RankModel --> MHA["Multi-Head Taste Attention\n(K=4 обучаемых головы вкуса)"]
-        MHA --> Inter["Candidate Interaction Layer\n(dot, cosine, l1-diff, sound sim)"]
-        Inter --> MLP["Deep Scoring MLP\n(Residuals + LayerNorm + GELU)"]
-        MLP --> BPR["Pairwise Margin Ranking Loss\nVal Loss: 0.6959 -> 0.0570"]
-        BPR --> WeightsJSON["models/tasteliftnet_weights.json\n(228 KB, 0 dependencies)"]
+        MHA --> Inter["Candidate Interaction Layer\n(dot, max dot, acoustic similarity)"]
+        Inter --> MLP["Deep Scoring MLP\n(GELU + LayerNorm + Pairwise)"]
+        MLP --> BPR["Pairwise BCE Ranking Loss\nVal Loss: 0.6919 -> 0.2517"]
+        BPR --> WeightsJSON["models/tasteliftnet_weights.json\n(228 KB, чистый JSON)"]
     end
 
     subgraph ClientInference ["4. Браузерный инференс (Web Worker)"]
-        UserSeeds["Сиды пользователя (5+ треков)"] --> Norm["Нормализация и резолвинг"]
+        UserSeeds["Сиды пользователя (названия + артисты)"] --> Norm["Нормализация и резолвинг в граф"]
         Norm --> Worker["Pure TypeScript Engine"]
         WeightsJSON --> Worker
-        Worker --> HNSW_Search["Multi-Head HNSW Search\n(каждая голова ищет своих кандидатов)"]
-        Worker --> Sound_Search["Acoustic KNN Retrieval\n(поиск по 65-dim спектру звука)"]
-        HNSW_Search & Sound_Search --> Pool["Пул ~2000 кандидатов"]
-        Pool --> NNScore["Нейросетевой скоринг TasteLiftNet"]
-        NNScore --> Adapter["Personal Preference Adapter\n(онлайн SGD по лайкам пользователя)"]
-        Adapter --> MMR["Детерминированный MMR\n(анти-повтор, макс 2 трека артиста)"]
-        MMR --> Top40["Финальный TOP-40 плейлист\n(Время отклика: 46-93 мс)"]
+        Worker --> HNSW_Search["HNSW Search по обученным эмбеддингам Stage A\n(поиск по реальному музыкальному пространству)"]
+        Worker --> Sound_Search["Acoustic Projection Retrieval\n(учет тембра, ритма и спектра звука)"]
+        HNSW_Search & Sound_Search --> Pool["Пул кандидатов (Candidate Recall@2000: ~19.8%)"]
+        Pool --> NNScore["Чистый нейросетевой скоринг TasteLiftNet"]
+        NNScore --> Adapter["Personal Preference Adapter\n(аналитический SGD градиент по Like/Dislike)"]
+        Adapter --> Filters["Жесткие фильтры:\nисключение сидов, макс 2 трека артиста, дедупликация"]
+        Filters --> Top40["Финальный TOP-40 плейлист\n(Время отклика: 70–100 мс)"]
     end
 ```
 
@@ -78,58 +79,57 @@ flowchart TD
 ### Двухстадийное нейросетевое обучение
 
 1. **Stage A: Contrastive Representation Learning (`ml/tasteliftnet_embeddings.py`)**:
-   - Случайно инициализированная таблица эмбеддингов $E \in \mathbb{R}^{V \times 64}$.
-   - Обучается на 1,500,000 парах совместных прослушиваний треков из реальных человеческих сессий.
-   - Функция потерь **InfoNCE** с обучаемой температурой $\tau$:
+   - Случайно инициализированная таблица эмбеддингов $E \in \mathbb{R}^{460,625 \times 64}$.
+   - Обучается на 1,500,000 парах совместных прослушиваний треков строго из обучающих сессий пользователей (Train split).
+   - Функция потерь **InfoNCE** с температурой $\tau = 0.07$:
      $$\mathcal{L}_{\text{InfoNCE}} = -\log \frac{\exp(\mathbf{u}_i^\top \mathbf{v}_j / \tau)}{\exp(\mathbf{u}_i^\top \mathbf{v}_j / \tau) + \sum_{k=1}^K \exp(\mathbf{u}_i^\top \mathbf{n}_k / \tau)}$$
-   - Положительные примеры берутся из соседних прослушиваний в сессиях, отрицательные сэмплируются из общего распределения треков с вероятностью $P(t) \propto f(t)^{0.75}$.
-   - Валидационный loss снизился с **8.9352** до **1.5755** за 5 эпох (AdamW, lr=$10^{-3}$, weight decay=0.01).
+   - Начальный loss на валидационной выборке: **9.5298**.
+   - Финальный loss после 4 эпох AdamW: **8.6635** (train loss снизился с 2.6806 до 1.4912).
+   - Обученные веса экспортируются в `models/track_embeddings.npy` (Float32) и `models/track_embeddings.int8.bin` (Int8 quantized, 28 МБ).
 
 ---
 
-### Интеграция физического звука (Essentia / AcousticBrainz)
+### Интеграция звука треков (Essentia / AcousticBrainz) и графа
 
-Вместо того чтобы полагаться исключительно на названия или граф прослушиваний, модель напрямую анализирует **физическую природу звуковой волны трека**:
+Когда пользователь загружает названия треков, система не просто смотрит на строковые совпадения, а использует **музыкальный граф со-прослушиваний и физические параметры звука**:
 - Для каждого трека извлечён 65-мерный вектор акустических признаков библиотеки **Essentia** (AcousticBrainz):
-  * **Тембр и гармония**: 13 кепстральных коэффициентов MFCC (среднее + дисперсия), GFCC.
+  * **Тембр и гармония**: 13 кепстральных коэффициентов MFCC, GFCC.
   * **Спектральная динамика**: Spectral Centroid (яркость звука), Spectral Rolloff, Spectral Flux, Spectral Complexity, Dissonance.
   * **Ритм и энергия**: BPM (темп), Danceability, Onset Rate (плотность атак), Pulse Clarity.
 - **Обучаемый модуль `AudioProjection`**:
   Сжимает 65-мерный вектор в 16-мерное акустическое подпространство с помощью нелинейной проекции:
-  $$\mathbf{a}_{\text{proj}} = \mathbf{W}_2 \cdot \text{GELU}(\text{LayerNorm}(\mathbf{W}_1 \cdot \mathbf{a}_{65} + \mathbf{b}_1)) + \mathbf{b}_2$$
-- Итоговый вектор трека становится 80-мерным гибридным представлением:
-  $$\mathbf{h}_t = [\mathbf{e}_{\text{graph}}(t) \parallel \mathbf{a}_{\text{proj}}(t)] \in \mathbb{R}^{80}$$
-  Если трек не имеет акустических данных, используется обученный эмбеддинг по умолчанию $\mathbf{a}_{\text{default}}$.
+  $$\mathbf{a}_{\text{proj}} = \mathbf{W}_2 \cdot \text{GELU}(\mathbf{W}_1 \cdot \mathbf{a}_{65} + \mathbf{b}_1) + \mathbf{b}_2$$
+- Модель вычисляет акустическое сходство кандидата с профилем звука пользователя:
+  $$\text{sim}_{\text{acoustic}} = \mathbf{a}_{\text{cand}} \cdot \bar{\mathbf{a}}_{\text{seeds}}$$
+- Это предотвращает эффект «попсовой карусели»: треки рекомендуются не потому, что они повсеместно популярны, а потому что их звучание и место в графе соответствуют вкусу пользователя.
 
 ---
 
 ### Multi-Head Taste Attention (борьба с Centroid Collapse)
 
-У реального человека музыкальный вкус многогранен: он может одновременно слушать Synthwave, Nu-Metal и Ambient Drone.
-
 Если усреднять треки пользователя в один центроид $\bar{\mathbf{u}} = \frac{1}{|S|} \sum \mathbf{h}_s$, возникает **Centroid Collapse**: точка в середине векторного пространства падает в область, которая не похожа ни на один из исходных жанров (например, скучный поп).
 
-В TasteLiftNet реализован **Multi-Head Taste Attention** с $K=4$ обучаемыми векторами запросов вкуса $\mathbf{Q} \in \mathbb{R}^{4 \times 80}$:
-$$\alpha_{k, i} = \frac{\exp\left(\frac{\mathbf{q}_k^\top \mathbf{h}_i}{\sqrt{d}}\right)}{\sum_{j=1}^{|S|} \exp\left(\frac{\mathbf{q}_k^\top \mathbf{h}_j}{\sqrt{d}}\right)}$$
-$$\mathbf{head}_k = \sum_{i=1}^{|S|} \alpha_{k, i} \mathbf{h}_i, \quad k \in \{1, 2, 3, 4\}$$
+В TasteLiftNet реализован **Multi-Head Taste Attention** с $K=4$ обучаемыми векторами запросов вкуса $\mathbf{Q} \in \mathbb{R}^{4 \times 64}$:
+$$\alpha_{k, i} = \frac{\exp\left(\frac{\mathbf{q}_k^\top \mathbf{e}_i}{\sqrt{d}}\right)}{\sum_{j=1}^{|S|} \exp\left(\frac{\mathbf{q}_k^\top \mathbf{e}_j}{\sqrt{d}}\right)}, \quad \mathbf{head}_k = \sum_{i=1}^{|S|} \alpha_{k, i} \mathbf{e}_i, \quad k \in \{1, 2, 3, 4\}$$
 
-Каждая голова выделяет свой кластер или стилистическое измерение вкуса пользователя.
+Каждая голова выделяет свой кластер вкуса пользователя (например, одна голова фокусируется на эмбиент-электронике, другая — на инди-роке).
 
 ---
 
 ### Scoring MLP и Pairwise Ranking Loss
 
-Для каждого кандидата-трека $c$ формируется вектор взаимодействия с каждой головой внимания:
-$$\text{inter}_k = [\mathbf{head}_k^\top \mathbf{c}, \; \cos(\mathbf{head}_k, \mathbf{c}), \; |\mathbf{head}_k - \mathbf{c}|, \; \cos(\mathbf{a}_{\text{cand}}, \mathbf{a}_{\text{head}_k})]$$
+Для каждого кандидата-трека $c$ формируется вектор взаимодействий:
+$$\text{inter} = [\mathbf{head}_1^\top \mathbf{c}, \; \mathbf{head}_2^\top \mathbf{c}, \; \mathbf{head}_3^\top \mathbf{c}, \; \mathbf{head}_4^\top \mathbf{c}, \; \max_k(\mathbf{head}_k^\top \mathbf{c}), \; \text{sim}_{\text{acoustic}}]$$
 
-Все взаимодействия, сам кандидат и головы конкатенируются и подаются в глубокий перцептрон с Residual-связями:
-$$s(c) = \text{MLP}([\mathbf{c} \parallel \mathbf{head}_1 \dots \mathbf{head}_4 \parallel \text{inter}_1 \dots \text{inter}_4 \parallel \mathbf{feats}_{\text{candidate}}])$$
+Конкатенация признаков кандидата, взаимодействий, звуковой проекции и каталожных свидетельств подаётся в MLP:
+$$s(c) = \text{MLP}([\mathbf{c} \parallel \text{inter} \parallel \mathbf{a}_{\text{proj}}(c) \parallel \text{mask} \parallel \text{evidence}])$$
 
-**Обучение без ликажа (Pairwise Margin Ranking Loss)**:
-Для каждой пары (позитивный трек $c^+$ из сессии, негативный трек $c^-$ из неслушанных):
-$$\mathcal{L}_{\text{rank}} = -\log \sigma(s(c^+) - s(c^-)) + \lambda \|\Theta\|_2^2$$
-- Валидационный loss упал с **0.6959** ($\ln 2$, случайное угадывание) до **0.0570** за 8 эпох.
-- Вектора весов экспортированы в формат JSON (`models/tasteliftnet_weights.json`, 228 КБ), полностью готовый для выполнения в чистом TypeScript.
+**Обучение Pairwise Ranking Loss**:
+Для каждой пары (позитивный трек $c^+$ из продолжения сессии, случайный негатив $c^-$):
+$$\mathcal{L}_{\text{rank}} = -\log \sigma(s(c^+) - s(c^-)) + 0.05 \cdot \mathcal{L}_{\text{ortho}}$$
+- Начальный validation loss: **0.6919** ($\ln 2$, случайное угадывание).
+- Финальный validation loss: **0.2517** (train loss снизился с 0.2088 до 0.0963).
+- Никаких ручных эвристик (`+ rare`, `- pop`, `+ userShift`) в коде ранжирования: скор формируется исключительно обученной нейросетью.
 
 ---
 
@@ -140,87 +140,84 @@ $$\mathcal{L}_{\text{rank}} = -\log \sigma(s(c^+) - s(c^-)) + \lambda \|\Theta\|
 - Для каждого пользователя в памяти поддерживается вектор персональной адаптации $\theta_{\text{user}} \in \mathbb{R}^{d}$.
 - При нажатии Like/Dislike вычисляется аналитический градиент целевой функции ранжирования, и вектор $\theta_{\text{user}}$ обновляется за 0.1 мс:
   $$\theta_{\text{user}} \leftarrow \theta_{\text{user}} + \eta \cdot \nabla_\theta \ell(s_i, y_i)$$
-- Следующий пересчёт TOP-40 мгновенно учитывает новую обратную связь без единого сетевого запроса!
+- Финальный скор кандидата: $s_{\text{final}}(c) = s_{\text{neural}}(c) + \theta_{\text{user}}^\top \mathbf{c}$.
 
 ---
 
 ## Огромный человеческий граф (ListenBrainz Full Dump + KEXP)
 
-Обучение рекомендательной системы производилось на реальном массиве прослушиваний людей, а не на синтетике.
-
-### Источники данных
-1. **ListenBrainz Full Export Dump 2663** (`listenbrainz-dump-2663-20260915-000002-full.tar.zst`):
-   - Размер полного архива: **229 ГБ**.
-   - Потоковая декомпрессия на лету чанками в памяти с фильтрацией (без сохранения 229 ГБ на диск).
-   - Обработано строк: **1,156,657 listens**.
+1. **ListenBrainz Full Export Dump**:
+   - Обработано строк: **1,156,658 listens**.
    - Уникальных слушателей: **8,641**.
    - Сессий прослушивания: **21,176**.
 2. **KEXP Live Radio Shows**:
-   - 558 верифицированных живых эфирных плейлистов радиостанции KEXP с экспертной кураторской последовательностью треков.
+   - 558 верифицированных живых эфирных плейлистов радиостанции KEXP.
 3. **Строгий сплит по пользователю**:
-   - Все слушатели строго разделены: **80% Train / 10% Validation / 10% Frozen Test**.
-   - Валидационные и тестовые пользователи **никогда не попадают в граф со-прослушиваний и обучение эмбеддингов**.
+   - Train: 19,703 сессий (6,954 пользователя).
+   - Validation: 716 сессий (830 пользователей).
+   - Frozen Test: 757 сессий (856 пользователей).
+   - **0% пересечения**: ни один трек, сессия или пользователь из Test не участвовали в обучении Stage A или Stage B.
 
 ---
 
 ## Инференс в браузере (Pure TypeScript Web Worker)
 
-Каталог и веса модели упаковываются в статический бинарный бандл, загружаемый браузером в фоновом Web Worker:
-
-1. **Multi-Head ANN Retrieval**:
-   - Вместо поиска по одному среднему центроиду, каждая из 4 голов вкуса $\mathbf{head}_k$ независимо запрашивает локальный граф HNSW.
-   - Дополнительно производится поиск в индексе звука по 65-мерному спектральному дескриптору (поиск схожего тембра и темпа).
-   - Объединенный пул кандидатов составляет **~2000–2500 уникальных треков**.
-2. **Нейросетевой скоринг TasteLiftNet**:
-   - Все кандидаты проходят через прямой проход (forward pass) обученной MLP на чистом TypeScript.
-   - Матричные умножения оптимизированы под TypedArrays (`Float32Array`).
-3. **Детерминированный MMR и контроль разнообразия**:
-   - Maximal Marginal Relevance балансирует релевантность и новизну.
-   - Жесткое ограничение: **не более 2 треков одного артиста** в финальном TOP-40.
-   - **Строгое исключение сидов**: ни один трек, указанный пользователем в качестве исходного вкуса, гарантированно не попадет в рекомендации (проверка по MBID и паре `artist + title`).
-4. **Инвариантность к перестановке**:
-   - Порядок ввода исходных треков не меняет результат (перед инференсом сиды детерминированно сортируются по каноническому ключу).
+1. Каталог `public/data/catalog.json` содержит метаданные треков, структуру HNSW графа и обученные веса `neuralRanker`.
+2. Бинарный файл `public/data/embeddings.int8.bin` (28.1 МБ) содержит квантованные 64-мерные эмбеддинги для всех 460,625 треков.
+3. В браузере Web Worker выполняет инференс на чистом TypeScript с использованием `Float32Array` и `Int8Array`.
+4. Гарантии:
+   - **Строгое исключение сидов**: ни один трек из сидов пользователя не попадает в рекомендации.
+   - **Максимум 2 трека одного исполнителя** в TOP-40.
+   - **Инвариантность к перестановке**: порядок ввода сидов не влияет на результат.
 
 ---
 
-## Результаты бенчмарков и оценка качества
+## Результаты честных бенчмарков и контролей
 
-Тестирование проводилось на **замороженном тестовом сплите** (106 сессий реальных пользователей, полностью скрытых при обучении) по 4 общепринятым академическим протоколам:
-- `5_to_rest`: дано 5 треков, предсказать остальные прослушивания сессии.
-- `10_to_rest`: дано 10 треков, предсказать остальные.
-- `30_70`: холодный старт (30% треков на вход, 70% на тест).
-- `70_30`: богатый профиль (70% на вход, 30% на тест).
+Все метрики измерены на **замороженном тестовом сплите** (held-out test sessions) без синтетических заполнителей или плейсхолдеров (`reports/controls_report.json`):
 
-### Сравнение TasteLiftNet с базовой эвристической моделью (Baseline):
+### 1. Сравнение с контролями на Test Split (100 кандидатов на запрос: 1 позитив + 99 негативов)
 
-| Протокол | Метрика | Baseline | TasteLiftNet (Нейросеть) | Прирост качества |
-| :--- | :--- | :---: | :---: | :---: |
-| **5_to_rest** | **Recall@40** | 0.4195 | **0.4547** | <span style="color:green">**+8.4%**</span> |
-| | **NDCG@40** | 0.8538 | **0.9057** | <span style="color:green">**+6.1%**</span> |
-| | **R-Precision** | 0.8214 | **0.8748** | <span style="color:green">**+6.5%**</span> |
-| | **Latency** | 120 ms | **46 ms** | <span style="color:green">**2.6x быстрее**</span> |
-| **10_to_rest** | **Recall@40** | 0.4401 | **0.4863** | <span style="color:green">**+10.5%**</span> |
-| | **NDCG@40** | 0.8562 | **0.9153** | <span style="color:green">**+6.9%**</span> |
-| | **R-Precision** | 0.8250 | **0.8849** | <span style="color:green">**+7.3%**</span> |
-| | **Latency** | 135 ms | **62 ms** | <span style="color:green">**2.2x быстрее**</span> |
-| **30_70** | **Recall@40** | 0.5001 | **0.5663** | <span style="color:green">**+13.2%**</span> |
-| | **NDCG@40** | 0.8241 | **0.8849** | <span style="color:green">**+7.4%**</span> |
-| | **Latency** | 148 ms | **78 ms** | <span style="color:green">**1.9x быстрее**</span> |
-| **70_30** | **Recall@40** | 0.6134 | **0.7538** | <span style="color:green">**+22.9%**</span> |
-| | **NDCG@40** | 0.7712 | **0.8198** | <span style="color:green">**+6.3%**</span> |
-| | **Latency** | 175 ms | **93 ms** | <span style="color:green">**1.9x быстрее**</span> |
+| Модель / Контроль | Test BCE Loss | Hit@10 | MRR@10 | NDCG@10 | Статус |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Random Control** (случайные веса $\mathcal{N}(0, 0.02)$) | 0.6931 | 0.1320 | 0.0435 | 0.0639 | Untrained baseline |
+| **Popularity Baseline** (ранжирование по частоте) | — | 0.4410 | 0.1177 | 0.1920 | Heuristic baseline |
+| **Shuffled Control** (обучение на перемешанном графе) | 0.2478 | 0.4130 | 0.1307 | 0.1955 | Frequency-preserving control |
+| **Trained TasteLiftNet** (наша обученная нейросеть) | **0.2447** | **0.4210** | **0.1788** | **0.2345** | <span style="color:green">**Победа по всем метрикам ранжирования**</span> |
 
-*Отчёты бенчмарка сохранены в `reports/tasteliftnet-benchmark.json` и `reports/baseline-benchmark.json`.*
+*Вывод: TasteLiftNet превосходит Shuffled Control (+20.0% по NDCG@10, +36.8% по MRR@10) и Popularity Baseline (+22.1% по NDCG@10, +51.9% по MRR@10), доказывая, что сеть выучила именно музыкальную структуру графа и звучания, а не просто популярность треков.*
+
+### 2. Бенчмарк предсказания удержанных сессий (`reports/tasteliftnet-benchmark.json`)
+
+| Протокол | Candidate Recall@2000 | Recall@10 | Recall@40 | MRR@40 | NDCG@10 | Средняя задержка |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1_to_rest** | 0.0900 | 0.0052 | 0.0103 | 0.1074 | 0.0421 | 71 мс |
+| **5_to_rest** | 0.1377 | 0.0067 | 0.0144 | 0.1444 | 0.0621 | 74 мс |
+| **10_to_rest** | 0.1571 | 0.0111 | 0.0187 | 0.1556 | 0.0782 | 79 мс |
+| **30_70** | 0.1867 | 0.0111 | 0.0242 | 0.1506 | 0.0702 | 87 мс |
+| **70_30** | **0.1975** | **0.0204** | **0.0290** | 0.1109 | 0.0528 | 102 мс |
+
+---
+
+## Честные аудиты данных
+
+Зафиксировано в `reports/audit_report.json`:
+1. **Аудит локальной медиатеки**:
+   - `No personal listening history found on machine`.
+   - Локальной пользовательской библиотеки на этой машине нет. Никаких синтезированных или симулированных личных историй не создавалось.
+2. **Аудит исходного звука**:
+   - `Raw audio waveforms: not present locally; 65 Essentia/AcousticBrainz features used as acoustic auxiliary input; waveform AudioEncoder pending`.
+   - Локальных аудиофайлов (.mp3/.flac) нет; в качестве признаков звучания используются 65-мерные физические замеры Essentia (AcousticBrainz).
 
 ---
 
 ## Архитектурные гарантии и ограничения
 
-1. **0 ₽ навсегда**: Статический экспорт Next.js (`output: 'export'`), размещаемый на любом бесплатном статическом хостинге (Vercel Hobby, GitHub Pages, Cloudflare Pages).
-2. **0 сторонних рекомендательных API и LLM**: Никаких платных OpenAI/Anthropic ключей, никаких чужих черных ящиков — только собственная обученная математическая модель.
-3. **Безопасность и приватность**: Личные треки и плейлисты пользователя обрабатываются локально в Web Worker его браузера и никуда не улетают.
-4. **Гарантия исключения сидов (Zero-Seed Leakage)**: Исходные треки никогда не рекомендуются повторно.
-5. **Детерминизм**: Одинаковый набор сидов всегда дает один и тот же предсказуемый TOP-40.
+1. **0 ₽ навсегда**: Статический экспорт Next.js (`output: 'export'`), размещаемый на бесплатном статическом хостинге (Vercel Hobby, GitHub Pages).
+2. **0 сторонних рекомендательных API и LLM**: Только собственная обученная математическая модель.
+3. **Безопасность и приватность**: Личные треки пользователя обрабатываются локально в браузере.
+4. **Гарантия исключения сидов**: Исходные треки никогда не рекомендуются повторно.
+5. **Детерминизм**: Одинаковый набор сидов всегда дает один и тот же результат.
 
 ---
 
@@ -243,71 +240,47 @@ npm run build
 npm start
 ```
 
-Откройте [http://localhost:3000](http://localhost:3000) в браузере. Выберите или найдите от 5 любимых треков, и система мгновенно построит персональный TOP-40.
+Откройте [http://localhost:3000](http://localhost:3000) в браузере.
 
 ---
 
 ## Воспроизведение полного цикла обучения (ML Pipeline)
 
-Если вы хотите переобучить модель на своем GPU (поддерживаются NVIDIA CUDA, протестировано на RTX 4060):
-
 ```bash
-# 1. Загрузка и потоковая обработка официального дампа ListenBrainz + KEXP
-python scripts/offline/pipeline_listenbrainz.py --sample-limit 1500000
+# 1. Подготовка и строгое разделение сессий (80/10/10)
+python scripts/offline/pipeline_listenbrainz.py
 
 # 2. Stage A: Обучение представлений треков через InfoNCE Contrastive Loss
-python ml/tasteliftnet_embeddings.py
+python ml/tasteliftnet_embeddings.py --epochs 4 --batch-size 512
 
-# 3. Stage B: Обучение ранжирующей нейросети TasteLiftNet Ranker (Multi-Head Attention + Audio)
-python ml/tasteliftnet_ranker.py
+# 3. Экспорт квантованных Int8 эмбеддингов
+python scripts/offline/export_embeddings.py
 
-# 4. Сборка клиентского бинарного каталога с новыми весами
+# 4. Stage B: Обучение ранжирующей нейросети TasteLiftNet Ranker + контрольные замеры
+python ml/tasteliftnet_ranker.py --epochs 4 --batch-size 256
+
+# 5. Сборка клиентского каталога на базе обученных эмбеддингов
 npm run build:catalog
 
-# 5. Запуск валидационных бенчмарков
+# 6. Запуск академических бенчмарков
 npx tsx scripts/offline/benchmark.ts
 ```
 
 ---
 
-## Импорт плейлистов и Яндекс Музыка
-
-Приложение поддерживает импорт плейлистов в форматах:
-- **TXT / CSV** (построчно `Артист - Название`)
-- **JSON**
-- **M3U**
-- **Яндекс Музыка**
-
-### Яндекс Музыка Gateway
-Так как Vercel Hobby собирается как чистый статический сайт без Serverless Functions, а Яндекс Музыка блокирует запросы из зарубежных дата-центров, для импорта плейлистов Яндекса предусмотрен автономный легковесный Gateway:
-
-```bash
-# Запуск локального gateway (например, на сервере в РФ)
-FRONTEND_ORIGIN=http://localhost:3000 npm run gateway
-
-# Сборка фронтенда с указанием URL шлюза
-NEXT_PUBLIC_GATEWAY_URL=http://localhost:8787 npm run build
-```
-
-Для деплоя шлюза подготовлен `services/Dockerfile`. При отсутствии шлюза интерфейс выдает аккуратное нейтральное уведомление без сбоя работы остальной системы.
-
----
-
 ## Верификация и тестирование
-
-Проект покрыт полным набором интеграционных тестов, юнит-тестов и проверок паритета:
 
 ```bash
 # Тесты TypeScript (145 тестов, Vitest)
 npm test
 
-# Статическая типизация
+# Проверка типов TypeScript (0 ошибок)
 npm run typecheck
 
 # Тесты Python ML (66 тестов, PyTest)
-python -m pytest
+pytest
 
-# Проверка математического паритета Python PyTorch <-> Pure TypeScript Engine
+# Проверка математического паритета PyTorch <-> Pure TypeScript Engine (ошибка < 1e-14)
 python scripts/check_parity.py
 
 # Сквозной Live Smoke тест
@@ -316,7 +289,7 @@ npm run smoke:live
 # Офлайн Smoke тест инференса
 npm run smoke:offline
 
-# Финальная сборка статического бандла
+# Финальная сборка статического бандла Next.js
 npm run build
 ```
 

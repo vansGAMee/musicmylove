@@ -1,0 +1,11 @@
+{
+  "status": "verified",
+  "num_tracks": 460625,
+  "embedding_dim": 64,
+  "mean_l2_norm": 1.0,
+  "f32_sha256": "02cbf7f92156fd62d6dd951b79b869430e1dc6f9d1f7c8de95593d285349dc5b",
+  "int8_sha256": "7138ebe239c6e1de48490c4a18348eddfb0bdd4d31e417a4204cb4c39efcc845",
+  "int8_byte_size": 29480000,
+  "int8_file": "public/data/embeddings.int8.bin",
+  "row_alignment_verified": true
+}

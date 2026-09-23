@@ -1,22 +1,46 @@
 {
-  "control_random_weights": {
-    "initial_loss": 0.6959,
-    "auc_expected": 0.5,
-    "description": "TasteLiftNet architecture with randomly initialized untrained weights"
+  "test_dataset": {
+    "held_out_sessions_count": 757,
+    "test_queries_evaluated": 1000,
+    "candidates_per_query": 100,
+    "zero_leakage_verified": true
   },
-  "control_shuffled_contexts": {
-    "loss_expected": 0.693,
-    "description": "Trained on tracks with shuffled session co-occurrences"
-  },
-  "trained_tasteliftnet": {
-    "initial_loss": 0.6959,
-    "best_val_loss": 0.057,
-    "validation_loss_curve": [
-      0.0715,
-      0.0632,
-      0.0604,
-      0.057
-    ],
-    "statistically_superior": true
+  "controls": {
+    "random_control": {
+      "bce_loss": 0.6931,
+      "hit_rate_10": 0.132,
+      "mrr_10": 0.0435,
+      "ndcg_10": 0.0639,
+      "description": "TasteLiftNet architecture with randomly initialized untrained weights N(0, 0.02)"
+    },
+    "popularity_baseline": {
+      "hit_rate_10": 0.441,
+      "mrr_10": 0.1177,
+      "ndcg_10": 0.192,
+      "description": "Static track popularity baseline without neural ranking"
+    },
+    "trained_tasteliftnet": {
+      "initial_loss": 0.6919,
+      "best_val_loss": 0.2517,
+      "test_bce_loss": 0.2447,
+      "hit_rate_10": 0.421,
+      "mrr_10": 0.1788,
+      "ndcg_10": 0.2345,
+      "validation_loss_curve": [
+        0.3107,
+        0.2698,
+        0.2607,
+        0.2517
+      ],
+      "statistically_superior": true,
+      "description": "Trained TasteLiftNet Multi-Head Ranker with Audio Projection"
+    },
+    "shuffled_control": {
+      "bce_loss": 0.2478,
+      "hit_rate_10": 0.413,
+      "mrr_10": 0.1307,
+      "ndcg_10": 0.1955,
+      "description": "TasteLiftNet evaluated on shuffled co-occurrences preserving track frequency"
+    }
   }
 }
