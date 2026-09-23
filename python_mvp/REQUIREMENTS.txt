@@ -1,0 +1,1055 @@
+Ты работаешь как ML/recommender engineering agent с доступом к репозиторию, терминалу и локальным файлам.
+
+ЗАДАЧА
+
+Сделай отдельный полностью рабочий Python-рекомендатель музыки:
+
+python recommend.py tracks.txt
+
+Вход:
+до 2000 строк вида:
+
+Nirvana - Lithium
+Nirvana - Heart-Shaped Box
+Metallica - One
+
+Выход:
+50 лучших новых треков:
+
+rank | artist | title | neural_score | taste_head | graph_support
+
+МИНИМАЛЬНЫЙ означает только отсутствие UI, сайта, TypeScript, Vercel, браузерной оптимизации и playback.
+
+НЕ УПРОЩАЙ САМУ РЕКОМЕНДАТЕЛЬНУЮ СИСТЕМУ.
+
+==================================================
+ГЛАВНОЕ ОПРЕДЕЛЕНИЕ
+==================================================
+
+ЭТО ДОЛЖНА БЫТЬ МОЯ СОБСТВЕННАЯ ИИ.
+
+Обязательные признаки:
+
+- neural network;
+- random initialization;
+- trainable weights;
+- loss;
+- backpropagation;
+- optimizer updates;
+- checkpoints;
+- inference на обученных весах.
+
+Human graph, ANN/HNSW, PPR, affinity formulas и filters НЕ являются моей ИИ.
+Это инфраструктура и данные вокруг моей ИИ.
+
+Запрещено выдавать их за AI.
+
+Запрещено использовать:
+
+- OpenAI/LLM внутри recommender;
+- Spotify recommendations;
+- Last.fm recommendations;
+- pretrained recommender;
+- pretrained embeddings;
+- pretrained graph model;
+- genre rules;
+- artist whitelist;
+- artist blacklist;
+- ручное правило "Nirvana = grunge";
+- handcrafted bonuses после neural score.
+
+==================================================
+КОНЕЧНАЯ АРХИТЕКТУРА
+==================================================
+
+Система должна работать так:
+
+REAL HUMAN LISTENING DATA
+        ↓
+clean track identities
+        ↓
+TWO HUMAN SIGNALS
+
+1. TRACK ↔ USER
+   долгосрочный вкус
+
+2. TRACK ↔ SESSION
+   локальный музыкальный контекст
+
+        ↓
+clean human graph
+        ↓
+МОЙ GraphEncoder
+random init + backprop
+        ↓
+learned music embeddings
+        ↓
+tracks.txt пользователя
+        ↓
+МОЯ Multi-Interest neural network
+        ↓
+несколько независимых taste vectors
+        ↓
+graph-gated candidate RANGE
+для каждого taste отдельно
+        ↓
+МОЙ neural ranker
+        ↓
+TOP 50
+
+Не заменяй эту архитектуру одним average embedding.
+
+==================================================
+ВАЖНО: РЕАЛЬНАЯ ЗАДАЧА
+==================================================
+
+Это НЕ next-song predictor.
+
+Пользователь даёт набор от нескольких до 2000 любимых треков без значимого порядка.
+
+Модель должна понять долгосрочные музыкальные вкусы пользователя.
+
+Training examples должны соответствовать production:
+
+реальная библиотека пользователя
+→ часть его треков hidden
+→ оставшиеся tracks являются seeds
+→ модель должна найти hidden tracks среди большого каталога.
+
+Sessions нужны как дополнительный human signal для построения пространства, но основная objective должна соответствовать задаче:
+
+SET OF LIKED TRACKS → MORE LIKED TRACKS.
+
+==================================================
+РАБОТАЙ ПО MILESTONES
+==================================================
+
+Сначала создай:
+
+python_mvp/PLAN.md
+
+В нём перечисли milestones, validation command и PASS condition для каждого.
+
+Потом выполняй их ПО ОЧЕРЕДИ.
+
+Не пиши весь проект вслепую одним огромным patch.
+
+После каждого milestone:
+
+1. реально запусти код;
+2. сохрани результат;
+3. проверь acceptance criteria;
+4. если FAIL — исправляй ЭТОТ слой;
+5. только после PASS переходи дальше.
+
+Не проси меня запускать команды, если у тебя есть terminal access.
+
+Если terminal/data недоступны:
+остановись с BLOCKED.
+
+НЕ выдумывай logs, metrics, dataset sizes или результаты обучения.
+
+==================================================
+MILESTONE 0 — ИЗОЛЯЦИЯ
+==================================================
+
+Не ломай существующий MusicMyLove.
+
+Создай:
+
+python_mvp/
+
+Всё новое хранить там.
+
+Можно читать старые datasets/artifacts,
+но не переписывать production frontend.
+
+Минимальная структура:
+
+python_mvp/
+    config.py
+    prepare_data.py
+    build_graph.py
+    train_graph.py
+    train_taste.py
+    train_ranker.py
+    evaluate.py
+    recommend.py
+
+    data/
+    models/
+    reports/
+
+==================================================
+MILESTONE 1 — DATA AUDIT
+==================================================
+
+Найди существующие реальные ListenBrainz data в проекте/на диске.
+
+Сначала установи ТОЧНО:
+
+- какие файлы существуют;
+- сколько bytes реально обработано;
+- сколько listens;
+- users;
+- tracks;
+- sessions;
+- recording MBIDs;
+- период данных.
+
+Не верь старым README/report claims без проверки файлов.
+
+Если данных недостаточно:
+сообщи DATA_BLOCKED.
+
+Не генерируй synthetic listens.
+
+Не называй маленький chunk "full ListenBrainz dump".
+
+Сохрани:
+
+reports/data_audit.json
+
+==================================================
+MILESTONE 2 — TRACK IDENTITY
+==================================================
+
+Главный ID:
+
+MusicBrainz Recording MBID, когда он реально присутствует.
+
+Не склеивай автоматически:
+
+- studio и live;
+- remix и original;
+- разные реальные recordings;
+- каверы;
+- разные исполнения.
+
+Fallback:
+
+artist identity + normalized title.
+
+Fuzzy matching разрешён только для CLI resolver и только при высокой уверенности.
+
+Неоднозначность:
+UNRESOLVED.
+
+Никогда не создавай случайный embedding неизвестному input track.
+
+Проверь:
+
+duplicate IDs = 0
+silent collisions = 0
+
+==================================================
+MILESTONE 3 — ДВА HUMAN GRAPH SIGNALS
+==================================================
+
+Не делай только:
+
+TRACK ↔ SESSION.
+
+Нужны отдельно:
+
+A. LONG TERM GRAPH
+
+TRACK ↔ USER
+
+Он показывает:
+какие треки устойчиво присутствуют у одних и тех же людей во времени.
+
+B. LOCAL CONTEXT GRAPH
+
+TRACK ↔ SESSION
+
+Он показывает:
+какие треки встречаются рядом внутри реальных listening contexts.
+
+Не схлопывай эти два смысла в один raw count.
+
+Для отношений track-track храни отдельно:
+
+global_user_affinity
+local_session_affinity
+support_users
+support_sessions
+confidence
+
+==================================================
+ОЧИСТКА GRAPH
+==================================================
+
+Не считать каждый listen одинаковым доказательством.
+
+Уменьшать влияние:
+
+- одного сверхактивного user;
+- repeated loops;
+- A A A A;
+- огромных sessions;
+- одного полного album run;
+- bot-like activity;
+- сверхпопулярных tracks;
+- одного-единственного co-occurrence;
+- огромных библиотек пользователя.
+
+Повторные подтверждения от одного человека должны saturate.
+
+Сильное relation требует НЕЗАВИСИМЫХ users.
+
+Popularity correction обязательна.
+
+Нельзя:
+
+popular A + popular B
+→ автоматически strong relationship.
+
+Используй статистически нормализованную association,
+но НЕ доверяй raw PMI для редких пар.
+
+Rare pair с большим PMI и двумя users должна иметь низкую confidence.
+
+Сохрани raw graph statistics.
+
+==================================================
+MILESTONE 4 — GRAPH AUDIT ДО AI
+==================================================
+
+До neural training сделай graph neighbour reports для нескольких recordings:
+
+Nirvana
+Metallica
+Ariana Grande
+Aphex Twin
+Joy Division
+Miles Davis
+Black Sabbath
+Boards of Canada
+
+Для каждого:
+
+neighbor
+global_user_affinity
+local_session_affinity
+support_users
+support_sessions
+confidence
+
+Это НЕ hardcoded training rules.
+
+Имена используются только как canary diagnostics.
+
+Если raw graph очевидно построен вокруг одной популярности или случайных соседей:
+
+GRAPH_FAIL.
+
+НЕ обучай GraphEncoder.
+
+Сначала исправь graph.
+
+==================================================
+MILESTONE 5 — SPLITS
+==================================================
+
+Split users BEFORE training examples:
+
+train
+development
+shadow validation
+final test
+
+Final test не использовать для model selection.
+
+Не смотреть final metrics после каждой попытки.
+
+Сохранить immutable split manifest + dataset fingerprint.
+
+Отдельно считать:
+
+seen tracks
+cold tracks
+
+Cold tracks без train evidence нельзя тихо индексировать как обученные.
+
+==================================================
+MILESTONE 6 — STRONG NON-NEURAL BASELINES
+==================================================
+
+До моей ИИ сделай реальные baselines:
+
+- popularity;
+- normalized item-item graph similarity;
+- graph diffusion / Personalized PageRank.
+
+Они нужны только для доказательства качества моей ИИ.
+
+Если даже clean graph baseline даёт мусор:
+GRAPH_FAIL.
+
+==================================================
+MILESTONE 7 — МОЯ ИИ: GRAPH ENCODER
+==================================================
+
+Реализуй небольшой собственный trainable GraphEncoder на PyTorch.
+
+Ориентир:
+LightGCN-like propagation.
+
+Но НЕ импортируй pretrained implementation/weights.
+
+Обязательное:
+
+random TrackEmbedding
+random UserEmbedding
+graph propagation
+96D output
+loss
+optimizer
+loss.backward()
+optimizer.step()
+checkpoint
+
+2 propagation layers — разумный старт.
+
+Не делай огромную архитектуру без доказанной необходимости.
+
+==================================================
+GRAPH TRAINING OBJECTIVE
+==================================================
+
+Основная задача:
+
+реальные human relationships
+должны получать большую similarity,
+чем неправдоподобные candidates.
+
+Negative pool должен содержать смесь:
+
+- random;
+- popularity-matched;
+- medium negatives;
+- hard negatives.
+
+НЕ повторять старый проёб:
+
+1 positive + 1 random negative.
+
+Но также НЕ считать:
+
+"нет прямого edge"
+=
+"точно negative".
+
+Hard candidate нельзя считать negative,
+если есть:
+
+- strong 2-hop graph evidence;
+- strong user overlap;
+- strong session evidence;
+- другая существенная human support.
+
+Не обучай модель отталкивать потенциально хорошие discoveries.
+
+Используй multi-negative contrastive/listwise objective.
+
+==================================================
+MILESTONE 8 — GRAPH ENCODER EVALUATION
+==================================================
+
+После каждой epoch считать DEV metrics.
+
+Не считать train loss доказательством качества.
+
+Особенно помни прошлый проёб:
+train loss сильно падал,
+а validation почти не улучшалась.
+
+Обязательно:
+
+Recall@10
+Recall@50
+Recall@100
+NDCG@10
+NDCG@50
+MRR
+
+Сравнить:
+
+trained
+random
+popularity
+graph baseline
+degree-preserving shuffled graph
+
+SHUFFLED CONTROL:
+
+shuffle должен сохранять user degree и track degree настолько возможно,
+разрушая реальные пары USER↔TRACK.
+
+Простой random shuffle, меняющий popularity distribution, запрещён.
+
+Если trained практически равен shuffled:
+GRAPH_ENCODER_FAIL.
+
+Если trained проигрывает strong graph baseline:
+не объявлять победу.
+
+==================================================
+MILESTONE 9 — FULL CATALOG EVALUATION
+==================================================
+
+Не повторять прошлую лазейку:
+
+1 positive + 99 random candidates.
+
+Основные ranking metrics считать по полному допустимому seen catalog
+либо exact/full-ranking способом.
+
+Небольшой sampled evaluation допускается только как быстрый debug metric,
+но НЕ release evidence.
+
+==================================================
+MILESTONE 10 — МОЯ ИИ ДЛЯ НЕСКОЛЬКИХ ВКУСОВ
+==================================================
+
+В production пользователь даёт SET из треков.
+
+Порядок строк не имеет смысла.
+
+Поэтому taste model должна быть permutation-invariant.
+
+Никакого RNN по порядку строк.
+
+Не делать:
+
+mean(all 2000 embeddings).
+
+Сделать trainable multi-interest/set network.
+
+Например:
+
+track embeddings
+→ learned projections/attention
+→ soft assignment
+→ максимум K taste heads
+→ normalized taste vectors
+
+Kmax = 16 для начала.
+
+Количество реально активных heads должно быть динамическим.
+
+Пустые heads отключать.
+
+Добавить защиту от head collapse.
+
+==================================================
+TASTE TESTS
+==================================================
+
+Обязательно:
+
+1. permutation test:
+перемешивание tracks.txt практически не меняет рекомендации.
+
+2. duplicate test:
+10 повторов одного seed не должны захватывать taste.
+
+3. mixed taste:
+смешанные реальные профили должны получать несколько distinct heads.
+
+4. stability:
+удаление случайных 10–20% большой библиотеки не должно полностью ломать основные heads.
+
+Если heads схлопнулись:
+TASTE_FAIL.
+
+==================================================
+MILESTONE 11 — RANGE GENERATOR
+==================================================
+
+Это КРИТИЧЕСКАЯ часть.
+
+Neural ranker НЕ должен видеть весь каталог.
+
+Для КАЖДОГО taste head отдельно:
+
+seeds / taste vector
+↓
+clean graph diffusion
++
+GraphEncoder neighbourhood
+↓
+human confidence gate
+↓
+candidate range
+
+Не брать "Top 2000 любой ценой".
+
+Использовать calibrated radius / confidence threshold.
+
+Когда заканчивается human-supported neighbourhood:
+range заканчивается.
+
+Разрешено получить:
+
+700 кандидатов
+
+вместо заполнения до 2000 мусором.
+
+==================================================
+ГЛАВНАЯ ЗАЩИТА ОТ ARIANA BUG
+==================================================
+
+Кандидат без достаточного human graph evidence для данного taste range
+НЕ передаётся neural ranker.
+
+Следовательно случайный далёкий popular track не должен иметь возможность попасть в TOP50 только потому, что neural score ошибся.
+
+Но НЕ писать:
+
+Ariana blacklist
+Nirvana whitelist
+genre filter.
+
+Защита должна быть общей для любых tracks.
+
+==================================================
+MILESTONE 12 — RANGE EVALUATION
+==================================================
+
+До ranker проверить RANGE.
+
+Считать:
+
+CandidateRecall@100
+@500
+@1000
+@2000
+
+на real hidden user items.
+
+Отдельно:
+
+profiles 5 tracks
+20 tracks
+50 tracks
+200 tracks
+500+ tracks
+
+Если good hidden items не попадают в range:
+RANGE_FAIL.
+
+НЕ пытайся чинить отсутствие кандидатов ranker'ом.
+
+==================================================
+MILESTONE 13 — МОЯ ИИ: NEURAL RANKER
+==================================================
+
+Только после PASS GraphEncoder + Range.
+
+Ranker — своя PyTorch network.
+
+Вход может содержать:
+
+candidate embedding
+taste-head vector/similarity
+global_user_affinity
+local_session_affinity
+support_users
+support_sessions
+confidence
+head mass
+
+Не подавать genre labels.
+
+Пример:
+
+input
+→ Linear 128
+→ GELU
+→ Linear 64
+→ GELU
+→ Linear 1
+
+Это только старт.
+Архитектуру меняй по DEV evidence.
+
+==================================================
+RANKER TRAINING
+==================================================
+
+Training distribution должна совпадать с production.
+
+Создай profile examples из реальных пользователей:
+
+user library
+↓
+hide часть tracks
+↓
+остальные = seeds
+↓
+построить taste heads
+↓
+запустить ТОТ ЖЕ production range
+↓
+hidden real tracks = positives
+↓
+остальные реальные range candidates = negative/unknown candidates
+↓
+train ranker
+
+Не обучать ranker преимущественно на random catalog negatives.
+
+==================================================
+FINAL SCORE
+==================================================
+
+final_score = neural ranker output.
+
+НЕ:
+
+neural
++ popularity bonus
++ rarity bonus
++ genre bonus
++ graph bonus.
+
+Graph evidence входит как feature в neural network и как candidate gate,
+но после neural output ручных музыкальных score additions нет.
+
+После scoring разрешены только технические ограничения:
+
+- remove input tracks;
+- remove exact duplicates;
+- remove explicit dislikes;
+- artist cap для presentation.
+
+Evaluation проводить ДО artist cap тоже,
+чтобы cap не скрывал плохую модель.
+
+==================================================
+MILESTONE 14 — RECOMMEND.PY
+==================================================
+
+Команда:
+
+python recommend.py tracks.txt
+
+Алгоритм:
+
+read
+→ resolve
+→ discard unresolved honestly
+→ load trained weights
+→ get learned track embeddings
+→ infer multiple taste heads
+→ create separate graph ranges
+→ union candidates
+→ neural ranker
+→ remove seeds/duplicates
+→ TOP50
+
+Печатать:
+
+resolved: X
+unresolved: Y
+active tastes: N
+candidate range: N
+
+TOP50 table.
+
+Сохранить:
+
+reports/last_recommendation.json
+
+с:
+
+resolved IDs
+unresolved input
+taste head masses
+candidate counts per head
+graph support
+neural score
+TOP50
+
+==================================================
+CANARY TESTS
+==================================================
+
+Smoke tests:
+
+Nirvana profile
+Metallica profile
+Ariana Grande profile
+Aphex Twin profile
+Miles Davis profile
+Nirvana + Joy Division + Boards of Canada
+Metallica + Aphex Twin
+
+Эти artist names НЕ использовать в training rules.
+
+Никаких manual expected artist lists.
+
+Canaries служат smoke tests,
+НЕ final proof.
+
+==================================================
+ARTIST LEAKAGE TEST
+==================================================
+
+Отдельно провести evaluation,
+где target tracks того же артиста, что seeds,
+удалены из relevance targets.
+
+Это проверяет,
+умеет ли система искать музыкальных соседей,
+а не только:
+
+Nirvana → другая Nirvana.
+
+==================================================
+GENRE LABELS
+==================================================
+
+Genre/tag labels можно применять ТОЛЬКО ПОСЛЕ training
+для независимого evaluation и visualization.
+
+Они запрещены:
+
+- в graph construction;
+- в neural inputs;
+- в loss;
+- в range filtering;
+- в final scoring.
+
+Можно считать:
+
+neighbour genre purity
+macro purity
+same/different-label similarities
+
+и строить UMAP.
+
+UMAP — visualization,
+не доказательство качества.
+
+==================================================
+RELEASE EVIDENCE
+==================================================
+
+Нельзя писать DONE только потому, что:
+
+- код запускается;
+- loss падает;
+- weights изменились;
+- одна красивая recommendation выглядит нормально.
+
+Нужны реальные доказательства.
+
+Минимум сравнить:
+
+POPULARITY
+GRAPH BASELINE
+RANDOM NETWORK
+DEGREE-PRESERVING SHUFFLED GRAPH
+TRAINED GRAPH ENCODER
+FINAL NEURAL SYSTEM
+
+Используй несколько random seeds обучения.
+
+Если результат существует только на одном seed:
+считать нестабильным.
+
+Для сравнений на user queries считать paired uncertainty,
+например bootstrap confidence intervals.
+
+==================================================
+ПРОШЛЫЕ ПРОЁБЫ, КОТОРЫЕ НЕЛЬЗЯ ПОВТОРЯТЬ
+==================================================
+
+1.
+Training vocabulary был ~460k,
+production catalog ~45k.
+
+Теперь явно печатай:
+
+raw tracks
+train seen tracks
+trained embeddings
+ANN indexed tracks
+recommendable tracks
+
+Эти понятия НЕ смешивать.
+
+2.
+Weights updated называлось доказательством обучения.
+
+Это НЕ доказательство качества.
+
+3.
+Train loss падал,
+validation почти стоял.
+
+Такую модель считать FAIL.
+
+4.
+Popularity baseline обгонял trained Hit@10.
+
+Такую модель не называть успешной.
+
+5.
+Shuffled graph был почти рядом с trained.
+
+Это серьёзный FAIL signal.
+
+6.
+CandidateRecall@2000 был около 9–20%.
+
+Ranker не способен исправить отсутствующий candidate.
+
+7.
+Evaluation на 100 candidates давала красивее цифры.
+
+Release evaluation не делать так.
+
+8.
+Random/cold embeddings могли существовать в vocab.
+
+Не индексировать необученные track rows как trained.
+
+9.
+Один случайный negative был слишком лёгким.
+
+Исправить hard-negative curriculum.
+
+10.
+HNSW/ANN нельзя называть AI.
+
+11.
+Human graph нельзя заменять learned embedding proximity.
+
+Graph evidence и learned space — разные сущности.
+
+12.
+Нельзя чинить конкретные canaries руками.
+
+==================================================
+AUDIO
+==================================================
+
+В ЭТОЙ ВЕРСИИ НЕ ДЕЛАТЬ AUDIO.
+
+Причина:
+сначала я хочу доказать graph-only recommender.
+
+Не выдавать:
+
+AcousticBrainz
+Essentia descriptors
+metadata
+genre
+
+за то, что моя ИИ "слышит музыку".
+
+Следующая версия получит отдельный собственный AudioEncoder,
+который будет обучаться на реальном audio.
+
+Не добавляй fake audio subsystem сейчас.
+
+==================================================
+ITERATION POLICY
+==================================================
+
+Если milestone FAIL:
+
+не перепрыгивай дальше.
+
+Диагностируй категорию:
+
+DATA_FAIL
+IDENTITY_FAIL
+GRAPH_FAIL
+GRAPH_ENCODER_FAIL
+TASTE_FAIL
+RANGE_FAIL
+RANKER_FAIL
+
+Меняй только относящийся к ней слой.
+
+Перезапускай его validation.
+
+Не снижай acceptance criteria постфактум только ради PASS.
+
+Не подгоняй artist names.
+
+==================================================
+BLOCKED POLICY
+==================================================
+
+Если невозможно честно продолжить из-за:
+
+- отсутствия реальных данных;
+- отсутствия disk/RAM;
+- недоступного файла;
+- отсутствия terminal;
+- невозможности завершить обучение;
+
+остановись.
+
+Напиши:
+
+BLOCKED
+
+и конкретно:
+
+1. на каком milestone;
+2. чего не хватает;
+3. какая команда/файл/ресурс нужен.
+
+НЕ генерируй фиктивный результат.
+
+==================================================
+DONE WHEN
+==================================================
+
+Работа закончена только когда реально существует:
+
+python_mvp/recommend.py
+
+и команда:
+
+python recommend.py example_tracks.txt
+
+реально загружает МОИ обученные neural checkpoints
+и возвращает TOP50.
+
+Также должны существовать реальные reports с:
+
+data audit
+graph audit
+training curves
+split manifest
+baseline comparison
+shuffled control
+full-catalog evaluation
+candidate recall
+taste stability tests
+ranker metrics
+canary outputs
+
+И финальный ответ должен коротко показать:
+
+1. какие реальные данные обработаны;
+2. сколько users/listens/tracks;
+3. сколько recommendable trained tracks;
+4. какие neural components реально обучались;
+5. train/DEV/shadow/final metrics;
+6. baselines;
+7. candidate recall;
+8. команду запуска;
+9. известные ограничения.
+
+НЕ ПИШИ DONE, ЕСЛИ ХОТЯ БЫ ОДИН ОБЯЗАТЕЛЬНЫЙ RELEASE GATE НЕ ПРОЙДЕН.
+
+Сначала изучи текущие данные и код, создай PLAN.md с milestones и validation commands, затем сразу приступай к выполнению плана.

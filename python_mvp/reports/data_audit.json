@@ -1,0 +1,43 @@
+{
+  "status": "DATA_BLOCKED",
+  "files": [
+    {
+      "path": "/home/ivan/musicmylove/data/cache/pipeline/expanded_catalog.json",
+      "bytes_processed": 85797044,
+      "sha256": "f1003cb16a2c84193a306267639745055dd82b29fa4f72e82baef3cb6365be77"
+    },
+    {
+      "path": "/home/ivan/musicmylove/data/cache/pipeline/expanded_sessions.json",
+      "bytes_processed": 2312352,
+      "sha256": "86755dbe9fa319617fd347874c66cff3584cb84c5374322cb48d7174a84441e8"
+    },
+    {
+      "path": "/home/ivan/musicmylove/data/cache/pipeline/split_sessions.json",
+      "bytes_processed": 2312368,
+      "sha256": "d815de6c05f02486ee45e688254498a50ed1a1fa977363160e17979eefa0b004"
+    }
+  ],
+  "bytes_processed": 90421764,
+  "catalog_rows": 460625,
+  "anonymous_sessions": 21176,
+  "session_item_occurrences": 293489,
+  "unique_session_track_indices": 117054,
+  "out_of_bounds_indices": 0,
+  "stored_split_sessions": {
+    "train": 19703,
+    "val": 716,
+    "test": 757
+  },
+  "verified_listens": null,
+  "verified_users": null,
+  "verified_recording_mbids": null,
+  "verified_period": null,
+  "reasons": [
+    "Sessions contain only catalog indices, no user identifiers or timestamps.",
+    "Old importer coalesces recording_mbid and recording_msid and merges by artist/title.",
+    "Catalog contains preseeded rows: row count is not trained or recommendable track count.",
+    "Raw ListenBrainz JSONL not found in repository data directory."
+  ],
+  "required_input": "Original ListenBrainz JSONL with user_name, timestamp/listened_at, track_metadata and original recording_mbid when present.",
+  "resume_command": "python prepare_data.py data/cache/listens.jsonl"
+}
