@@ -25,6 +25,19 @@ def test_identity_preserves_recordings_and_ignores_msid():
     assert len({a['id'], b['id'], c['id']}) == 3
 
 
+def test_recording_aliases_and_fallback_distinct():
+    from python_mvp.prepare_data import identify
+    row1 = {'track_metadata': {'artist_name': 'Artist', 'track_name': 'Title',
+                                'additional_info': {'artist_mbids': ['00000000-0000-4000-8000-000000000001']}}}
+    row2 = {'track_metadata': {'artist_name': 'Artist feat. Other', 'track_name': 'Title',
+                                'additional_info': {'artist_mbids': ['00000000-0000-4000-8000-000000000001']}}}
+    assert identify(row1)['id'] != identify(row2)['id']
+    mbid = '00000000-0000-4000-8000-000000000099'
+    row1['track_metadata']['additional_info']['recording_mbid'] = mbid
+    row2['track_metadata']['additional_info']['recording_mbid'] = mbid
+    assert identify(row1)['id'] == identify(row2)['id'] == f'mbid:{mbid}'
+
+
 def test_set_heads_ignore_order_and_duplicates_and_backpropagate():
     from python_mvp.networks import MultiInterest, NeuralRanker
     torch.manual_seed(5)

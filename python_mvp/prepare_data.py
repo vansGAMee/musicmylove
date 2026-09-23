@@ -29,9 +29,7 @@ def identify(row):
     mbid = info.get('recording_mbid') or (meta.get('mbid_mapping') or {}).get('recording_mbid')
     if mbid:
         mbid = str(uuid.UUID(mbid))  # Invalid explicit IDs are rejected, never guessed.
-    artist_ids = info.get('artist_mbids') or []
-    identity = '|'.join(sorted(str(uuid.UUID(x)) for x in artist_ids)) if artist_ids else normalize(artist)
-    key = identity + '\x1f' + normalize(title)
+    key = normalize(artist) + '\x1f' + normalize(title)
     return {'id': 'mbid:' + mbid if mbid else 'fallback:' + hashlib.sha256(key.encode()).hexdigest(),
             'artist': artist.strip(), 'title': title.strip(), 'recording_mbid': mbid,
             'fallback_key': key}
