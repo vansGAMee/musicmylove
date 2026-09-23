@@ -1,16 +1,29 @@
 # CURRENT STATUS
 
-Код продолжен в рамках текущего python_mvp. Готовы загрузчик официальных daily
-ListenBrainz dumps, проверка SHA-256/HTTP Range, извлечение без tar path traversal,
-сохранение user_name/timestamp, stable user sampling, изолированные run directories,
-artifact contracts, отдельный negative sampler, blockwise co-occurrence,
-DEV-only range calibration, автоматический pipeline и реальный engineering smoke.
-MultiInterest использует differentiable routing и residual projections, сохраняя
-пространство GraphEncoder вместо случайного поворота перед retrieval.
+Реальный data import, graph build и tiny neural smoke успешно завершены со статусом ENGINEERING_PASS.
+Astra baseline заморожен в неизменяемом теге astra-python-mvp-foundation.
+Исправлен конфликт fallback-идентификаторов треков без recording MBID (разные строки artist_name больше не склеиваются без confirmed MBID).
+Смоделирован и доказан полный цикл обучения собственной нейросети:
+- GraphEncoder forward → loss → backward → optimizer.step() → weights_updated: true
+- MultiInterest forward → loss → backward → optimizer.step() → weights_updated: true
+- NeuralRanker forward → loss → backward → optimizer.step() → weights_updated: true
+- Checkpoint roundtrip + reload inference verified.
+- Все 20 tests пройдены.
+Большое обучение НЕ запускалось, как предписано инструкцией.
 
-Обычные модели загружаются только после DEV_PASS. Диагностические smoke-веса
-НЕ принимаются recommend.py и НЕ обозначают доказанного качества.
-Завершённые проверки и real-data результаты записаны в `reports/continuation.json`.
+# ASTRA CHECKPOINT SHA
+`cc0047c0ec80d3c414911d023f635ad4ae65466a` (tag: `astra-python-mvp-foundation`)
+
+# GEMINI CHANGES SHA
+Commits after Astra checkpoint:
+1. `52ee831` — `fix: handle recording aliases in importer`
+2. `0bf5c00` — `fix: calibrate range in smoke_real and record weight update proofs`
+3. (Current commit) — `docs: update HANDOFF.md with checkpoint verification and smoke results`
+
+# LAST SUCCESSFUL STAGE
+`python run_pipeline.py smoke --run data/smoke-real --days 1 --user-fraction 0.05`
+Exit code: 0, status: `ENGINEERING_PASS`.
+Reports: `data/smoke-real/reports/smoke_real.json`, `data/smoke-real/reports/graph_audit.json`.
 
 # NEXT COMMAND
 
