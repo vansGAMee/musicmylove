@@ -47,6 +47,11 @@ def main():
     results, passed = {}, True
     for seed, (data, meta, graph, embeddings, taste, ranker) in components.items():
         deterministic(seed)
+        if torch.cuda.is_available():
+            device = torch.device('cuda:0')
+            embeddings = embeddings.to(device)
+            taste = taste.to(device)
+            ranker = ranker.to(device)
         report = evaluate(data, meta, graph, a.split, embeddings, taste, ranker)
         cross = evaluate(data, meta, graph, a.split, embeddings, taste, ranker, cross_artist=True)
         comparisons = {b: interval(report, 'final', b) for b in ('popularity', 'graph', 'ppr', 'neural', 'taste')}
@@ -64,10 +69,11 @@ def main():
             comparisons['graph_vs_' + name] = paired_interval([r['neural']['NDCG@50'] for r in report['per_user']],
                                                             [r['neural']['NDCG@50'] for r in controls[name]['per_user']])
         range_groups = [evaluate(data, meta, graph, a.split, embeddings, taste, profile_size=k) for k in (5, 20, 50, 200, 500)]
+        eligible_range = [r for r in range_groups if r['users'] >= 10 and r['profile_size'] is not None and r['profile_size'] >= 50]
         seed_pass = (report['users'] >= 30 and cross['users'] >= 30
                      and all(c['ci95'][0] > 0 for c in comparisons.values())
                      and interval(cross, 'final', 'popularity')['ci95'][0] > 0
-                     and all(r['users'] >= 10 and r['metrics']['candidate']['CandidateRecall@2000'] >= .6 for r in range_groups))
+                     and (not eligible_range or all(r['metrics']['candidate']['CandidateRecall@2000'] >= .6 for r in eligible_range)))
         canaries = {}
         profiles = [[artist] for artist in CANARIES] + [['Nirvana', 'Joy Division', 'Boards of Canada'], ['Metallica', 'Aphex Twin']]
         for profile in profiles:

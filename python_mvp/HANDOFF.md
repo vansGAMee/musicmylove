@@ -106,3 +106,34 @@ artifact hashes/status; quality thresholds ради PASS; порядок user sp
 Known boundaries: in-RAM preprocessing; no mid-epoch optimizer resume; explicit
 likes недоступны; confidence/radius direct-neighbor range может иметь низкий recall.
 Только данные и DEV evidence определяют, достаточно ли текущей архитектуры.
+
+## 2026-09-24: discovery code handoff
+
+Current entry point from repository root: `python -m python_mvp.refresh`.
+No downloads; import existing accepted graph vectors from `python_mvp/data/main`,
+train Taste + learned fusion ranker on TRAIN users, select on DEV. New outputs:
+`python_mvp/data/discovery-v1`. Source checkpoints remain untouched.
+
+`refresh --prepare-only` validates/imports artifacts without training. Import is
+explicit: original source contract and checkpoint hash remain in provenance.
+Strict runtime contracts reject old executable model code. Do not remove this
+check or relabel old ranker weights as compatible with the new architecture.
+
+The main run already consumed final. Its lock is copied on preparation and resume.
+The copied graph is a historical representation, not a newly verified encoder.
+This update does not establish better recommendation quality. Do not tune on or
+reopen final; do not lower gates to obtain PASS. If DEV fails, keep the report and
+status. `--experimental` still requires accepted DEV weights.
+
+Changes: typo-safe exact identity matching and ambiguous-known exclusion; real
+radius filtering; each candidate scored against every active interest; learned
+fusion without a fixed evidence/taste score mixture; whole-artist TRAIN holdout
+alongside ordinary completion; no epoch-zero release; no fallback across runs;
+exact ordered stability with fail-closed errors. Audio experiments are not used
+by the recommendation path or the default pipeline.
+
+Verification includes `python -m pytest` (now discovers Python MVP tests too),
+`npm test`, `npm run typecheck`, `python scripts/check_parity.py`,
+`npm run smoke:live`, and `npm run build`. Tiny synthetic optimization tests are
+unit checks, never evidence of recommendation quality. No dataset training was
+run during this code update.

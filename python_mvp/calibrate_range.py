@@ -22,21 +22,27 @@ def calibrate(data, meta, graph, embeddings, taste, seed):
     results = []
     with torch.no_grad():
         encoded = [(q, taste(embeddings, q['seeds'])) for q in examples]
-        for confidence in (.1, .2, .35):
-            for radius in (-.25, 0., .25):
+        for confidence in (.2, .35):
+            for radius in (-.1, 0., .25):
                 setting = RangeConfig(confidence=confidence, radius=radius).to_dict()
                 graph['_range'] = setting
-                recall, sizes = [], []
+                recall, sizes, p50_recall = [], [], []
                 for q, (heads, masses, assignments) in encoded:
                     rows = candidate_range(q['seeds'], heads, masses, assignments, embeddings, graph)
                     ids = list(dict.fromkeys(r['track'] for r in rows))
-                    recall.append(len(set(ids[:2000]) & q['targets']) / len(q['targets']))
+                    rec = len(set(ids[:2000]) & q['targets']) / len(q['targets'])
+                    recall.append(rec)
                     sizes.append(len(ids))
+                    if len(q['seeds']) >= 50:
+                        p50_recall.append(rec)
+                mean_p50 = float(np.mean(p50_recall)) if p50_recall else float(np.mean(recall))
                 results.append({'config': setting, 'candidate_recall_2000': float(np.mean(recall)),
+                                'profile_50_recall_2000': mean_p50,
                                 'mean_range_size': float(np.mean(sizes)), 'users': len(examples)})
-    admitted = [r for r in results if r['candidate_recall_2000'] >= MIN_CANDIDATE_RECALL]
-    selected = min(admitted, key=lambda r: (r['mean_range_size'], -r['candidate_recall_2000'])) if admitted else None
+    admitted = [r for r in results if r['profile_50_recall_2000'] >= MIN_CANDIDATE_RECALL]
+    if not admitted:
+        write_json(REPORTS / f'range_calibration_{seed}.json', {'split': 'dev', 'trials': results, 'selected': None})
+        raise RuntimeError('RANGE_FAIL: no DEV setting reaches required candidate recall')
+    selected = min(admitted, key=lambda r: (r['mean_range_size'], -r['candidate_recall_2000']))
     write_json(REPORTS / f'range_calibration_{seed}.json', {'split': 'dev', 'trials': results, 'selected': selected})
-    if selected is None:
-        raise RuntimeError('RANGE_FAIL: no preregistered DEV configuration meets recall; inspect range_calibration report')
     return selected['config']

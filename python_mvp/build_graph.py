@@ -60,9 +60,16 @@ def adjacency(matrix):
                                    torch.tensor(adj.data, dtype=torch.float32), adj.shape, check_invariants=True).coalesce()
 
 
-def load_graph():
-    meta = json.loads((DATA / 'graph.json').read_text())
-    result = {k: sparse.load_npz(DATA / (k + '.npz')).tocsr()
+def load_graph(data_dir=None):
+    import os
+    from pathlib import Path
+    if data_dir is not None:
+        base = Path(data_dir)
+    else:
+        run_env = os.environ.get('MUSICMVP_RUN')
+        base = Path(run_env).resolve() / 'data' if run_env else DATA
+    meta = json.loads((base / 'graph.json').read_text())
+    result = {k: sparse.load_npz(base / (k + '.npz')).tocsr()
               for k in ('global', 'local', 'users', 'sessions', 'confidence', 'user_incidence', 'session_incidence')}
     return meta, result
 

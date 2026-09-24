@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 try:
     from .config import DATA, DIM, HEADS, fingerprint
@@ -46,16 +47,29 @@ def validate_production_range(config):
         raise RuntimeError(f"DIAGNOSTIC_SMOKE_RANGE_IN_PRODUCTION: min_users {users} < 3")
 
 
-def contract(directory=DATA):
-    directory = Path(directory)
+def contract(directory=None):
+    if directory is not None:
+        directory = Path(directory)
+    else:
+        run_env = os.environ.get('MUSICMVP_RUN')
+        directory = (Path(run_env).resolve() / 'data') if run_env else DATA
     paths = [directory / name for name in ('dataset.json', 'split_manifest.json', 'graph.json')]
     paths += sorted(directory.glob('*.npz'))
-    sources = [Path(__file__).with_name(name) for name in ('networks.py', 'retrieval.py', 'config.py', 'prepare_data.py', 'build_graph.py', 'training.py', 'evaluate.py', 'sampling.py', 'calibrate_range.py')]
+    sources = [Path(__file__).with_name(name) for name in ('networks.py', 'retrieval.py', 'config.py', 'prepare_data.py', 'build_graph.py', 'training.py', 'evaluate.py', 'sampling.py', 'calibrate_range.py', 'recommend.py', 'artifacts.py', 'refresh.py')]
     return {'schema': 2, 'model': {'dimension': DIM, 'heads': HEADS, 'layers': 2},
-            'artifacts': {p.name: fingerprint(p) for p in paths},
+            'artifacts': {p.name: fingerprint(p) for p in paths if p.exists()},
             'implementation': {p.name: fingerprint(p) for p in sources if p.exists()}}
 
 
 def validate_contract(saved, current):
-    if not saved or saved != current:
-        raise RuntimeError('ARTIFACT_MISMATCH: dataset, split, graph, vocabulary, config or implementation changed; use a new experiment')
+    if not saved:
+        raise RuntimeError('ARTIFACT_MISMATCH: missing contract')
+    if saved.get('schema') != current.get('schema'):
+        raise RuntimeError('ARTIFACT_MISMATCH: schema version mismatch')
+    if saved.get('artifacts') != current.get('artifacts'):
+        raise RuntimeError('ARTIFACT_MISMATCH: dataset, split or graph changed; use a new experiment')
+    if saved.get('model') != current.get('model'):
+        raise RuntimeError('ARTIFACT_MISMATCH: model architecture configuration changed; use a new experiment')
+
+    if not saved.get('implementation') or saved.get('implementation') != current.get('implementation'):
+        raise RuntimeError('ARTIFACT_MISMATCH: implementation changed; explicitly prepare a new experiment')

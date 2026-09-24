@@ -37,10 +37,35 @@ def write_json(path, obj):
     tmp.replace(path)
 
 
-def load_data():
-    path = DATA / 'dataset.json'
+def set_run(run_dir):
+    global RUN, DATA, MODELS, REPORTS
+    RUN = Path(run_dir).resolve()
+    DATA = RUN / 'data'
+    MODELS = RUN / 'models'
+    REPORTS = RUN / 'reports'
+    os.environ['MUSICMVP_RUN'] = str(RUN)
+    import sys
+    for mod in list(sys.modules.values()):
+        if mod is not None and Path(getattr(mod, '__file__', '') or '').resolve().parent == ROOT:
+            if hasattr(mod, 'RUN') and getattr(mod, 'RUN', None) != RUN:
+                mod.RUN = RUN
+            if hasattr(mod, 'DATA') and getattr(mod, 'DATA', None) != DATA:
+                mod.DATA = DATA
+            if hasattr(mod, 'MODELS') and getattr(mod, 'MODELS', None) != MODELS:
+                mod.MODELS = MODELS
+            if hasattr(mod, 'REPORTS') and getattr(mod, 'REPORTS', None) != REPORTS:
+                mod.REPORTS = REPORTS
+    return RUN
+
+
+def load_data(data_path=None):
+    if data_path is not None:
+        path = Path(data_path)
+    else:
+        run_env = os.environ.get('MUSICMVP_RUN')
+        path = (Path(run_env).resolve() / 'data' / 'dataset.json') if run_env else (DATA / 'dataset.json')
     if not path.exists():
-        raise RuntimeError('DATA_BLOCKED: run prepare_data.py on original ListenBrainz JSONL with users and timestamps')
+        raise RuntimeError(f'DATA_BLOCKED: dataset missing in requested run: {path}')
     return json.loads(path.read_text())
 
 

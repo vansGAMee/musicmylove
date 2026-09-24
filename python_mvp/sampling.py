@@ -30,3 +30,20 @@ def protect(seeds, graph):
     twohop = set(strong[first].nonzero()[1].tolist()) if len(first) else set()
     return direct | twohop
 
+
+
+def profile_episode(known, tracks, rng, discovery=False):
+    """Mix library completion with whole-artist holdout, using TRAIN users only."""
+    items = sorted(known)
+    if discovery:
+        groups = {}
+        for i in items:
+            groups.setdefault(tracks[i]['artist'].casefold(), []).append(i)
+        eligible = [a for a in sorted(groups) if len(items) - len(groups[a]) >= 2]
+        if eligible:
+            artist = eligible[int(rng.integers(len(eligible)))]
+            targets = set(groups[artist])
+            return sorted(set(items) - targets)[:2000], targets
+    items = rng.permutation(items).tolist()
+    cut = min(2000, max(2, int(.8 * len(items))))
+    return sorted(items[:cut]), set(items[cut:])

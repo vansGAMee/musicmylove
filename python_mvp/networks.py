@@ -41,13 +41,25 @@ class MultiInterest(nn.Module):
         self.queries = nn.Parameter(torch.randn(heads, dim) / math.sqrt(dim))
         self.key = nn.Linear(dim, dim, bias=False)
         self.value = nn.Linear(dim, dim, bias=False)
+        self.audio_proj = nn.Linear(dim, dim, bias=False)
+        self.audio_gate = nn.Linear(dim * 2, 1)
         self.temperature = nn.Parameter(torch.tensor(-2.))
+        nn.init.eye_(self.audio_proj.weight)
+        nn.init.zeros_(self.audio_gate.weight)
+        nn.init.zeros_(self.audio_gate.bias)
 
-    def forward(self, embeddings, seeds):
+    def forward(self, embeddings, seeds, audio_embeddings=None, audio_mask=None):
         seeds = sorted(set(int(i) for i in seeds))
         if not seeds:
             raise ValueError('No resolved trained seeds')
         x = embeddings[seeds]
+        if audio_embeddings is not None and audio_mask is not None:
+            a = audio_embeddings[seeds]
+            mask = audio_mask[seeds].unsqueeze(-1).float()
+            proj_a = self.audio_proj(a)
+            gate = torch.sigmoid(self.audio_gate(torch.cat((x, proj_a), dim=-1))) * mask
+            x = F.normalize(x + gate * proj_a, dim=-1)
+
         # Keep the graph's learned geometry; learn small residuals rather than
         # randomly rotating all music vectors before the confidence/radius gate.
         keys = F.normalize(x + .1 * self.key(x), dim=-1)
@@ -59,6 +71,7 @@ class MultiInterest(nn.Module):
         mass = assignments.mean(0)
         heads = F.normalize(assignments.T @ (x + .1 * self.value(x)), dim=-1)
         return heads, mass, assignments
+
 
     @staticmethod
     def regularization(heads, masses, assignments):
@@ -72,11 +85,45 @@ class MultiInterest(nn.Module):
 
 
 class NeuralRanker(nn.Module):
+    """Learned fusion of graph geometry and evidence; no fixed score mixture."""
     def __init__(self, dim=DIM):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(dim * 3 + 7, 128), nn.GELU(),
-                                 nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
+        self.net = nn.Sequential(
+            nn.Linear(dim * 4 + 7, 128), nn.GELU(),
+            nn.Linear(128, 64), nn.GELU(), nn.Linear(64, 1))
 
     def forward(self, candidates, heads, evidence):
+        # Signed log compression changes units, not musical preference weights.
+        evidence = evidence.sign() * torch.log1p(evidence.abs())
         dot = (candidates * heads).sum(-1, keepdim=True)
-        return self.net(torch.cat((candidates, heads, candidates * heads, dot, evidence), -1)).squeeze(-1)
+        features = torch.cat((candidates, heads, candidates * heads,
+                              (candidates - heads).abs(), dot, evidence), dim=-1)
+        return self.net(features).squeeze(-1)
+
+
+class MultimodalRanker(nn.Module):
+    """Deep ranker fusing candidate graph representation, audio representation, and evidence."""
+    def __init__(self, dim=DIM):
+        super().__init__()
+        # graph candidate (dim) + graph head (dim) + elem product (dim) + dot (1)
+        # audio candidate (dim) + audio head (dim) + audio dot (1) + audio mask (1)
+        # evidence features (6)
+        in_dim = dim * 5 + 9
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.GELU(),
+            nn.Linear(128, 64),
+            nn.GELU(),
+            nn.Linear(64, 1)
+        )
+
+    def forward(self, cand_graph, cand_audio, cand_mask, head_graph, head_audio, evidence):
+        dot_graph = (cand_graph * head_graph).sum(-1, keepdim=True)
+        masked_audio = cand_audio * cand_mask
+        dot_audio = (masked_audio * head_audio).sum(-1, keepdim=True)
+        features = torch.cat((
+            cand_graph, head_graph, cand_graph * head_graph, dot_graph,
+            masked_audio, head_audio, dot_audio, cand_mask,
+            evidence
+        ), dim=-1)
+        return self.net(features).squeeze(-1)

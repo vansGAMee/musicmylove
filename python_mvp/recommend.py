@@ -16,35 +16,52 @@ except ImportError:
     from retrieval import candidate_range, score_rows
 
 
-def resolve(lines, tracks):
-    by_id, by_name = {}, defaultdict(list)
+def match_key(value):
+    import re
+    value = normalize(value).translate(str.maketrans({'’': "'", '‘': "'", '‐': '-', '‑': '-', '–': '-', '—': '-'}))
+    return re.sub(r'\s+-\s+', ' - ', value)
+
+
+def match_inputs(lines, tracks):
+    by_id, by_name = {}, defaultdict(set)
     for i, track in enumerate(tracks):
         by_id[track['id']] = i
         if track.get('recording_mbid'):
             by_id[track['recording_mbid']] = i
-        names = {(normalize(track['artist']), normalize(track['title']))}
+        names = {(track['artist'], track['title'])}
         names.update(tuple(a) for a in track.get('aliases', []))
-        for artist, title in sorted(names):
-            by_name[artist + ' - ' + title].append(i)
+        for artist, title in names:
+            by_name[match_key(artist + ' - ' + title)].add(i)
+    for line in sorted({line.strip() for line in lines if line.strip()}):
+        yield line, ({by_id[line]} if line in by_id else by_name.get(match_key(line), set()))
+
+
+def resolve(lines, tracks):
     resolved, unresolved = set(), []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if line in by_id:
-            resolved.add(by_id[line])
-            continue
-        matches = by_name.get(normalize(line), [])
+    for line, matches in match_inputs(lines, tracks):
         if len(matches) == 1:
-            resolved.add(matches[0])
+            resolved.update(matches)
         else:
             unresolved.append(line)
-    return sorted(resolved), sorted(set(unresolved))
+    return sorted(resolved), unresolved
+
+
+def known_track_indices(lines, tracks):
+    # Ambiguous names cannot form a taste vector, but all matching recordings
+    # must still be excluded from discovery. Never pretend they are unknown.
+    return {i for _, matches in match_inputs(lines, tracks) for i in matches}
 
 
 def recommend(lines, seed=42, artist_cap=None):
     deterministic(seed)
     data, meta, graph, embeddings, taste, ranker = load_components(seed, require_ranker=True)
+    if torch.cuda.is_available():
+        device = torch.device('cuda:0')
+        embeddings = embeddings.to(device)
+        taste = taste.to(device)
+        ranker = ranker.to(device)
+    lines = list(lines)
+    known = known_track_indices(lines, meta['tracks'])
     seeds, unresolved = resolve(lines, meta['tracks'])
     if not seeds:
         raise RuntimeError('UNRESOLVED: no unambiguous input recordings in trained catalog')
@@ -58,16 +75,18 @@ def recommend(lines, seed=42, artist_cap=None):
         tid = row['track']
         track = meta['tracks'][tid]
         artist = normalize(track['artist'])
-        if tid in used or tid in seeds or (artist_cap is not None and artists[artist] >= artist_cap):
+        if tid in used or tid in known or (artist_cap is not None and artists[artist] >= artist_cap):
             continue
         used.add(tid); artists[artist] += 1
         ranked.append({'rank': len(ranked) + 1, 'id': track['id'], 'artist': track['artist'],
                        'title': track['title'], 'neural_score': score, 'taste_head': row['head'],
                        'graph_support': {'users': row['support_users'], 'sessions': row['support_sessions'],
-                                         'confidence': row['features'][4]}})
+                                         'confidence': row['features'][4]},
+                       'modality': row.get('modality', 'graph')})
         if len(ranked) == 50:
             break
     return {'fingerprint': data['fingerprint'], 'seed': seed, 'status': 'EXPERIMENTAL',
+            'known_excluded_count': len(known),
             'resolved_ids': [meta['tracks'][i]['id'] for i in seeds], 'unresolved_input': unresolved,
             'taste_head_masses': masses.tolist(), 'active_tastes': len(set(assignments.argmax(-1).tolist())),
             'candidate_counts_per_head': dict(Counter(r['head'] for r in rows)),

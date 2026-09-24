@@ -92,19 +92,21 @@ def evaluate(data, meta, graph, split='dev', embeddings=None, taste=None, ranker
         candidate_ids = []
         with torch.no_grad():
             if embeddings is not None:
-                scores['neural'] = (embeddings @ torch.nn.functional.normalize(embeddings[seeds].mean(0), dim=0)).numpy()
+                emb_cpu = embeddings.detach().cpu()
+                scores['neural'] = (emb_cpu @ torch.nn.functional.normalize(emb_cpu[seeds].mean(0), dim=0)).numpy()
             if taste is not None:
                 heads, masses, assignment = taste(embeddings, seeds)
                 active = sorted(set(assignment.argmax(-1).tolist()))
-                scores['taste'] = (embeddings @ heads[active].T).max(-1).values.numpy()
-                rows = candidate_range(seeds, heads, masses, assignment, embeddings, graph)
+                scores['taste'] = (embeddings.detach().cpu() @ heads[active].detach().cpu().T).max(-1).values.numpy()
+                rows = candidate_range(seeds, heads.detach().cpu(), masses.detach().cpu(), assignment.detach().cpu(), embeddings.detach().cpu(), graph)
                 candidate_ids = list(dict.fromkeys(r['track'] for r in rows if r['track'] not in excluded))
                 if ranker is not None:
-                    values = score_rows(rows, ranker, embeddings, heads).numpy()
+                    values = score_rows(rows, ranker, embeddings, heads).detach().cpu().numpy()
                     final = np.full(n, -np.inf)
                     for row, value in zip(rows, values):
                         final[row['track']] = max(final[row['track']], float(value))
                     scores['final'] = final
+
         result = {'user': query['user']}
         for method, values in scores.items():
             values = values.copy()

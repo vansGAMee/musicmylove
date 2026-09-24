@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('action', choices=['all', 'data', 'graph', 'train-graph', 'train-taste', 'train-ranker', 'evaluate', 'release', 'recommend', 'smoke'])
+    p.add_argument('action', choices=['all', 'data', 'graph', 'train-graph', 'train-taste', 'train-ranker', 'evaluate', 'release', 'verify-release', 'recommend', 'smoke'])
     p.add_argument('tracks', nargs='?', default=str(ROOT/'example_tracks.txt'))
     p.add_argument('--run', type=Path, default=ROOT/'data'/'main')
     p.add_argument('--days', type=int, default=7)
@@ -22,12 +22,12 @@ def main():
     p.add_argument('--epochs', type=int, default=10)
     p.add_argument('--seeds', type=int, nargs='+', default=[42,43,44])
     args = p.parse_args()
-    if args.action in ('all', 'release') and len(set(args.seeds)) < 3:
+    if args.action in ('all', 'release', 'verify-release') and len(set(args.seeds)) < 3:
         p.error('Release pipeline requires at least three distinct seeds')
     run = args.run.resolve()
     os.environ['MUSICMVP_RUN'] = str(run)
     reports = run/'reports'; reports.mkdir(parents=True, exist_ok=True)
-    if (reports/'final_consumed.lock').exists() and args.action not in ('recommend','evaluate'):
+    if (reports/'final_consumed.lock').exists() and args.action not in ('recommend','evaluate','verify-release'):
         p.error('Final split already consumed: frozen run cannot be trained/rebuilt again')
 
     def execute(script, options=(), resume=False, expected=()):
@@ -46,7 +46,8 @@ def main():
                 result[str(path)] = h.hexdigest()
             return result
         inputs = list(ROOT.glob('*.py')) + [run/'data'/'dataset.json', run/'data'/'split_manifest.json']
-        if script != 'build_graph.py': inputs += [run/'data'/'graph.json'] + list((run/'data').glob('*.npz'))
+        if script != 'build_graph.py':
+            inputs += [run/'data'/'graph.json'] + list((run/'data').glob('*.npz'))
         if script == 'train_taste.py': inputs += [run/'models'/f'graph_{options[1]}.pt']
         if script == 'train_ranker.py': inputs += [run/'models'/f'graph_{options[1]}.pt', run/'models'/f'taste_{options[1]}.pt']
         before = digest_files(inputs)
@@ -91,14 +92,19 @@ def main():
             execute(f'train_{stage}.py',['--seed',seed,'--epochs',args.epochs],resume=True,
                     expected=[run/'models'/f'{stage}_{seed}.pt'])
 
+    def verify_release():
+        execute('verify_release.py', ['--run', str(run), '--seeds', *args.seeds])
+
     try:
         if args.action == 'all':
             data(); graph()
             for stage in ('graph','taste','ranker'): train(stage)
             execute('release_check.py',['--split','shadow','--seeds',*args.seeds])
             execute('release_check.py',['--split','final','--seeds',*args.seeds])
+            verify_release()
         elif args.action == 'data': data()
         elif args.action == 'graph': graph()
+        elif args.action == 'verify-release': verify_release()
         elif args.action.startswith('train-'): train(args.action.removeprefix('train-'))
         elif args.action == 'evaluate':
             for seed in args.seeds: execute('evaluate.py',['--split','dev','--seed',seed])
