@@ -9,6 +9,7 @@ from .config import ROOT, write_json, fingerprint
 from .discovery import signature
 from .discovery_engine import DiscoveryEngine, DiscoveryRanker, read_library, select_playlist, input_keys
 from .recommend import resolve, match_key
+from .profile_input import resolve_profile
 
 MODES = {'1': ('Смешанный', 2, 1.), '2': ('Открытия: больше новых исполнителей', 2, .30),
          '3': ('Чистый порядок нейросети', 50, 1.)}
@@ -50,8 +51,9 @@ def export_playlist(result, output):
     return folder
 
 
-def generate(engine, model, lines, known, mode):
-    seeds, unresolved = resolve(lines, engine.tracks)
+def generate(engine, model, lines, known, mode, strict=False):
+    profile = resolve_profile(lines, engine.tracks, strict=strict)
+    seeds, unresolved = profile['seeds'], profile['unresolved']
     if not seeds:
         raise ValueError('Ни один трек не распознан однозначно. Попробуй другой список или точные Artist - Title.')
     features, candidates, _ = engine.features(seeds)
@@ -65,11 +67,14 @@ def generate(engine, model, lines, known, mode):
              'artist_not_in_library': match_key(engine.tracks[i]['artist']) not in familiar}
             for rank, i in enumerate(ids)]
     return {'status': 'EXPERIMENTAL', 'mode': title, 'input': lines, 'known_exclusions': known,
-            'resolved': len(seeds), 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
+            'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
 
 def show(result, folder):
     print(f"\nРаспознано: {result['resolved']}/{len(result['input'])} · кандидатов: {result['candidates']}")
+    approximate = sum(m['kind'] != 'exact_name_or_id' for m in result.get('matching', []))
+    if approximate:
+        print(f'Из них совпадений по названию/ремастеру: {approximate}; это не точное определение аудиозаписи.')
     if result['unresolved']:
         print('Нераспознанные треки не формируют вкус; список сохранён в unresolved.txt.')
     for row in result['top50']:
@@ -89,6 +94,7 @@ def main():
     parser.add_argument('--source', type=Path, default=ROOT / 'data/main')
     parser.add_argument('--output', type=Path, default=ROOT / 'data/cli-playlists')
     parser.add_argument('--mode', choices=MODES, default='1')
+    parser.add_argument('--strict-matching', action='store_true', help='Только прежнее однозначное сопоставление')
     parser.add_argument('--once', action='store_true', help='Создать плейлист и выйти')
     args = parser.parse_args()
     if args.once and not args.library:
@@ -106,7 +112,7 @@ def main():
         model = load_ranker(engine, args.run)
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
-            last = generate(engine, model, lines, known, mode)
+            last = generate(engine, model, lines, known, mode, strict=args.strict_matching)
             last['checkpoint_sha256'] = fingerprint(args.run / 'ranker.pt')
             show(last, export_playlist(last, args.output))
         if args.once:
@@ -133,7 +139,7 @@ def main():
                         pasted.append(line)
                     lines = validate_lines(pasted); last = None
                 elif action == '3':
-                    last = generate(engine, model, validate_lines(lines), known, mode)
+                    last = generate(engine, model, validate_lines(lines), known, mode, strict=args.strict_matching)
                     last['checkpoint_sha256'] = fingerprint(args.run / 'ranker.pt')
                     show(last, export_playlist(last, args.output))
                 elif action == '4':
@@ -154,7 +160,7 @@ def main():
                     known = sorted(set(known) | {f"{r['artist']} - {r['title']}" for r in last['top50'] if r['rank'] in numbers})
                     print('Запомнил для этой сессии. Нажми 3, чтобы обновить плейлист.')
                 elif action == '7':
-                    _, unresolved = resolve(validate_lines(lines), engine.tracks)
+                    unresolved = resolve_profile(validate_lines(lines), engine.tracks, strict=args.strict_matching)['unresolved']
                     print('\n'.join(unresolved) or 'Все треки распознаны.')
                 else:
                     print('Выбери пункт меню.')
