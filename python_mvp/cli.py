@@ -15,6 +15,14 @@ MODES = {'1': ('Смешанный', 2, 1.), '2': ('Открытия: больш
          '3': ('Чистый порядок нейросети', 50, 1.)}
 
 
+def default_run():
+    for name in ('refined-v1', 'honest-v1', 'discovery-v3'):
+        run = ROOT / 'data' / name
+        if (run / 'ranker.pt').exists():
+            return run
+    return ROOT / 'data/honest-v1'
+
+
 def validate_lines(lines):
     lines = sorted({line.strip() for line in lines if line.strip()})
     if not 1 <= len(lines) <= 2000:
@@ -69,11 +77,13 @@ def generate(engine, model, lines, known, mode, strict=False):
              'id': engine.tracks[i]['id'], 'neural_score': float(scores[i]),
              'artist_not_in_library': match_key(engine.tracks[i]['artist']) not in familiar}
             for rank, i in enumerate(ids)]
-    return {'status': 'EXPERIMENTAL', 'mode': title, 'input': lines, 'known_exclusions': known,
+    return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': lines, 'known_exclusions': known,
             'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
 
 def show(result, folder):
+    if result['status'] == 'LISTENER_BASELINE_NO_ACCEPTED_NEURAL_GAIN':
+        print('Используется базовый метод по слушателям: нейронная поправка не прошла DEV-отбор.')
     print(f"\nРаспознано: {result['resolved']}/{len(result['input'])} · кандидатов: {result['candidates']}")
     approximate = sum(m['kind'] != 'exact_name_or_id' for m in result.get('matching', []))
     if approximate:
@@ -93,7 +103,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('library', nargs='?', help='JSON, CSV или TXT; необязательно')
     parser.add_argument('--known', help='Полная библиотека для исключения уже знакомого')
-    parser.add_argument('--run', type=Path, default=ROOT / 'data/discovery-v3')
+    parser.add_argument('--run', type=Path, default=default_run())
     parser.add_argument('--source', type=Path, default=ROOT / 'data/main')
     parser.add_argument('--output', type=Path, default=ROOT / 'data/cli-playlists')
     parser.add_argument('--mode', choices=MODES, default='1')
@@ -109,9 +119,13 @@ def main():
         lines = read_path(args.library) if args.library else []
         known = read_path(args.known) if args.known else []
         mode, last = args.mode, None
-        print('Музыкальная лаборатория · готовая нейросеть · без обучения и скачиваний')
+        print('Музыкальная лаборатория · готовый рекомендатель · без обучения и скачиваний')
+        print(f'Эксперимент: {args.run}')
         print('Загружаю модель один раз…', flush=True)
-        if (args.run / 'partition.json').exists():
+        if (args.run / 'refinement.json').exists():
+            from .refine_ranker import load_refined
+            engine, model = load_refined(args.run)
+        elif (args.run / 'partition.json').exists():
             from .honest_training import load_run
             engine, model = load_run(args.run)
         else:
