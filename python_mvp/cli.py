@@ -4,19 +4,22 @@ from datetime import datetime
 import json
 from pathlib import Path
 import sys
+import uuid
+import numpy as np
 import torch
 from .config import ROOT, write_json, fingerprint
 from .discovery import signature
 from .discovery_engine import DiscoveryEngine, DiscoveryRanker, read_library, select_playlist, input_keys
 from .recommend import resolve, match_key
 from .profile_input import resolve_profile
+from . import feedback
 
 MODES = {'1': ('Смешанный', 2, 1.), '2': ('Открытия: больше новых исполнителей', 2, .30),
          '3': ('Чистый порядок нейросети', 50, 1.)}
 
 
 def default_run():
-    for name in ('refined-v1', 'honest-v1', 'discovery-v3'):
+    for name in ('expanded-v1/model', 'refined-v1', 'honest-v1', 'discovery-v3'):
         run = ROOT / 'data' / name
         if (run / 'ranker.pt').exists():
             return run
@@ -47,6 +50,18 @@ def load_ranker(engine, run):
     return model
 
 
+def open_engine(run, source):
+    run = Path(run)
+    if (run / 'refinement.json').exists():
+        from .refine_ranker import load_refined
+        return load_refined(run)
+    if (run / 'partition.json').exists():
+        from .honest_training import load_run
+        return load_run(run)
+    engine = DiscoveryEngine(source)
+    return engine, load_ranker(engine, run)
+
+
 def export_playlist(result, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -59,15 +74,23 @@ def export_playlist(result, output):
     return folder
 
 
-def generate(engine, model, lines, known, mode, strict=False):
+def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedback.DEFAULT,
+             checkpoint=None, personal=True):
     profile = resolve_profile(lines, engine.tracks, strict=strict)
     seeds, unresolved = profile['seeds'], profile['unresolved']
     if not seeds:
         raise ValueError('Ни один трек не распознан однозначно. Попробуй другой список или точные Artist - Title.')
     features, candidates, _ = engine.features(seeds)
     scores = engine.score(model, features)
+    personal_features = np.column_stack((features, engine.embeddings.detach().cpu().numpy()))
+    base_scores = scores.copy()
+    personal_scale = max(.05, float(np.std(base_scores[sorted(candidates)]))) if candidates else .05
+    personal_status = 'Личный слой выключен'
+    if personal and checkpoint:
+        from .personal import adjust
+        scores, personal_status = adjust(feedback_dir, checkpoint, personal_features, scores, candidates)
     title, cap, share = MODES[mode]
-    excluded = sorted(set(lines) | set(known))
+    excluded = sorted(set(lines) | set(known) | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
     if hasattr(engine, 'select_playlist'):
         ids = engine.select_playlist(scores, candidates, excluded, artist_cap=cap, familiar_share=share)
     else:
@@ -75,13 +98,18 @@ def generate(engine, model, lines, known, mode, strict=False):
     familiar = {a for a, _ in input_keys(excluded)}
     rows = [{'rank': rank + 1, 'artist': engine.tracks[i]['artist'], 'title': engine.tracks[i]['title'],
              'id': engine.tracks[i]['id'], 'neural_score': float(scores[i]),
+             'base_score': float(base_scores[i]), 'personal_features': personal_features[i].tolist(),
+             'personal_scale': personal_scale,
              'artist_not_in_library': match_key(engine.tracks[i]['artist']) not in familiar}
             for rank, i in enumerate(ids)]
-    return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': lines, 'known_exclusions': known,
+    return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': lines, 'known_exclusions': excluded,
+            'checkpoint_sha256': checkpoint, 'exposure_id': uuid.uuid4().hex, 'personal_status': personal_status,
             'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
 
 def show(result, folder):
+    if result.get('personal_status'):
+        print(result['personal_status'])
     if result['status'] == 'LISTENER_BASELINE_NO_ACCEPTED_NEURAL_GAIN':
         print('Используется базовый метод по слушателям: нейронная поправка не прошла DEV-отбор.')
     print(f"\nРаспознано: {result['resolved']}/{len(result['input'])} · кандидатов: {result['candidates']}")
@@ -109,6 +137,8 @@ def main():
     parser.add_argument('--mode', choices=MODES, default='1')
     parser.add_argument('--strict-matching', action='store_true', help='Только прежнее однозначное сопоставление')
     parser.add_argument('--once', action='store_true', help='Создать плейлист и выйти')
+    parser.add_argument('--feedback', type=Path, default=feedback.DEFAULT, help='Папка личных оценок и модели')
+    parser.add_argument('--no-personal', action='store_true', help='Сравнить выдачу без личной поправки')
     args = parser.parse_args()
     if args.once and not args.library:
         parser.error('--once требует путь к библиотеке')
@@ -117,34 +147,45 @@ def main():
         if not (args.run / 'ranker.pt').exists():
             load_ranker(None, args.run)
         lines = read_path(args.library) if args.library else []
-        known = read_path(args.known) if args.known else []
+        known = feedback.import_known(args.feedback, args.known) if args.known else feedback.known_lines(args.feedback)
         mode, last = args.mode, None
         print('Музыкальная лаборатория · готовый рекомендатель · без обучения и скачиваний')
         print(f'Эксперимент: {args.run}')
         print('Загружаю модель один раз…', flush=True)
-        if (args.run / 'refinement.json').exists():
-            from .refine_ranker import load_refined
-            engine, model = load_refined(args.run)
-        elif (args.run / 'partition.json').exists():
-            from .honest_training import load_run
-            engine, model = load_run(args.run)
-        else:
-            engine = DiscoveryEngine(args.source)
-            model = load_ranker(engine, args.run)
+        checkpoint = fingerprint(args.run / 'ranker.pt')
+        engine, model = open_engine(args.run, args.source)
+        if checkpoint != fingerprint(args.run / 'ranker.pt'):
+            raise RuntimeError('Общая модель изменилась во время загрузки. Перезапусти CLI.')
+        def make_playlist():
+            return generate(engine, model, validate_lines(lines), known, mode,
+                            strict=args.strict_matching, feedback_dir=args.feedback,
+                            checkpoint=checkpoint, personal=not args.no_personal)
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
-            last = generate(engine, model, lines, known, mode, strict=args.strict_matching)
-            last['checkpoint_sha256'] = fingerprint(args.run / 'ranker.pt')
+            last = make_playlist()
             show(last, export_playlist(last, args.output))
         if args.once:
             return 0
         while True:
             print(f'Профиль: {len(lines)} треков · уже знакомое: {len(known)} · {MODES[mode][0]}')
             print('1 Файл  2 Вставить треки  3 Получить плейлист  4 Режим\n'
-                  '5 Загрузить уже знакомое  6 Отметить знакомые из выдачи  7 Нераспознанные  0 Выход')
+                  '5 Загрузить уже знакомое  6 Отметить знакомые из выдачи  7 Нераспознанные\n'
+                  '8 Покрытие графа  9 Мои оценки  0 Выход\n'
+                  'Оценки: лайк 1 3-5 · дизлайк 8 · знаю 2 · новое 3 · сброс 8 · отмена')
             action = input('> ').strip()
             try:
-                if action == '0':
+                words = action.split(maxsplit=1)
+                actions = {'лайк': 'like', 'дизлайк': 'dislike', 'знаю': 'known', 'новое': 'new', 'сброс': 'clear'}
+                if words and words[0] in actions:
+                    if len(words) != 2:
+                        raise ValueError('Добавь номера треков из последней выдачи')
+                    count = feedback.record(args.feedback, last, actions[words[0]], words[1])
+                    print(f'Сохранено: {count}. Нажми 3 для следующей выдачи.')
+                elif action == 'отмена':
+                    feedback.undo(args.feedback)
+                    known = feedback.known_lines(args.feedback)
+                    print('Последнее действие с оценками или импортом знакомого отменено.')
+                elif action == '0':
                     return 0
                 if action == '1':
                     value = input('Путь к JSON/CSV/TXT [~/Downloads/liked.json]: ').strip() or '~/Downloads/liked.json'
@@ -160,8 +201,7 @@ def main():
                         pasted.append(line)
                     lines = validate_lines(pasted); last = None
                 elif action == '3':
-                    last = generate(engine, model, validate_lines(lines), known, mode, strict=args.strict_matching)
-                    last['checkpoint_sha256'] = fingerprint(args.run / 'ranker.pt')
+                    last = make_playlist()
                     show(last, export_playlist(last, args.output))
                 elif action == '4':
                     print('\n'.join(f'{key} {value[0]}' for key, value in MODES.items()))
@@ -170,19 +210,29 @@ def main():
                         raise ValueError('Выбери 1, 2 или 3.')
                     mode = chosen
                 elif action == '5':
-                    known = read_path(input('Файл уже знакомых треков: '))
-                    print('Будут исключены из выдачи, но не добавлены к профилю вкуса.')
+                    known = feedback.import_known(args.feedback, input('Файл уже знакомых треков: '))
+                    print('Сохранены между запусками и исключены из выдачи; к профилю вкуса не добавлены.')
                 elif action == '6':
                     if not last:
                         raise ValueError('Сначала получи плейлист.')
-                    numbers = {int(n) for n in input('Номера знакомых треков через пробел: ').replace(',', ' ').split()}
-                    if not numbers or not numbers <= set(range(1, len(last['top50']) + 1)):
-                        raise ValueError('Укажи номера из последней выдачи.')
-                    known = sorted(set(known) | {f"{r['artist']} - {r['title']}" for r in last['top50'] if r['rank'] in numbers})
-                    print('Запомнил для этой сессии. Нажми 3, чтобы обновить плейлист.')
+                    feedback.record(args.feedback, last, 'known', input('Номера знакомых треков: '))
+                    print('Сохранено между запусками. В режиме открытий будут исключены.')
                 elif action == '7':
                     unresolved = resolve_profile(validate_lines(lines), engine.tracks, strict=args.strict_matching)['unresolved']
                     print('\n'.join(unresolved) or 'Все треки распознаны.')
+                elif action == '8':
+                    from .coverage import diagnose
+                    report = diagnose(engine, validate_lines(lines))
+                    target = args.feedback/'coverage.json'
+                    write_json(target, report)
+                    print(report['counts']); print(f'Подробности: {target}')
+                elif action == '9':
+                    import shlex
+                    print(json.dumps(feedback.summary(args.feedback), ensure_ascii=False))
+                    print('Обновить личную модель отдельной командой:')
+                    print('python -m python_mvp.personal train --run ' + shlex.quote(str(args.run))
+                          + ' --feedback ' + shlex.quote(str(args.feedback)))
+                    print('Откат: python -m python_mvp.personal rollback --feedback ' + shlex.quote(str(args.feedback)))
                 else:
                     print('Выбери пункт меню.')
             except (OSError, ValueError, TypeError, KeyError) as error:
