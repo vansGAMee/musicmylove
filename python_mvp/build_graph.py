@@ -74,18 +74,32 @@ def load_graph(data_dir=None):
     return meta, result
 
 
+def supported_core(users, minimum_support=MIN_USERS):
+    """Count distinct actual rows, pruning singleton contexts to a fixed point."""
+    users = sorted(users, key=lambda u: u['id'])
+    if len({u['id'] for u in users}) != len(users):
+        raise ValueError('Duplicate user IDs would inflate independent support')
+    seen = set(t for u in users for t in u['tracks'])
+    while True:
+        retained = [u for u in users if len(set(u['tracks']) & seen) >= 2]
+        counts = Counter(t for u in retained for t in set(u['tracks']) & seen)
+        updated = {t for t, c in counts.items() if c >= minimum_support}
+        if updated == seen:
+            return retained, sorted(seen)
+        users, seen = retained, updated
+
+
 def build():
     data = load_data()
     # Huge libraries are retained in dataset for positives, excluded from graph fitting.
     train = [u for u in data['users'] if u['split'] == 'train' and 5 <= len(u['tracks']) <= 2000]
-    counts = Counter(t for u in train for t in u['tracks'])
-    seen = sorted(t for t, c in counts.items() if c >= MIN_USERS)
+    train, seen = supported_core(train)
     if len(seen) < 100:
         raise RuntimeError('DATA_BLOCKED: fewer than 100 tracks supported by >=3 independent train users')
     index = {t: i for i, t in enumerate(seen)}
     libraries, user_ids, sessions, session_weights = [], [], [], []
     for u in train:
-        library = sorted(index[t] for t in u['tracks'] if t in index)
+        library = sorted({index[t] for t in u['tracks'] if t in index})
         if len(library) < 2:
             continue
         user_ids.append(u['id'])
@@ -99,6 +113,8 @@ def build():
             sessions.append(s)
             session_weights.append((1 - .8 * dominance) / max(1, len(valid)))
     ui, si = incidence(libraries, len(seen)), incidence(sessions, len(seen))
+    if not np.all(np.asarray(ui.sum(0)).ravel() >= MIN_USERS):
+        raise RuntimeError('Catalog support differs from actual graph rows')
     global_a, support_u, degree = association(ui)
     eligible = support_u.copy(); eligible.data[:] = 1
     local_a, support_s, _ = association(si, session_weights, minimum_support=1, eligible=eligible)

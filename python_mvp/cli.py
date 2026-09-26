@@ -60,7 +60,10 @@ def generate(engine, model, lines, known, mode, strict=False):
     scores = engine.score(model, features)
     title, cap, share = MODES[mode]
     excluded = sorted(set(lines) | set(known))
-    ids = select_playlist(engine.tracks, scores, candidates, excluded, artist_cap=cap, familiar_share=share)
+    if hasattr(engine, 'select_playlist'):
+        ids = engine.select_playlist(scores, candidates, excluded, artist_cap=cap, familiar_share=share)
+    else:
+        ids = select_playlist(engine.tracks, scores, candidates, excluded, artist_cap=cap, familiar_share=share)
     familiar = {a for a, _ in input_keys(excluded)}
     rows = [{'rank': rank + 1, 'artist': engine.tracks[i]['artist'], 'title': engine.tracks[i]['title'],
              'id': engine.tracks[i]['id'], 'neural_score': float(scores[i]),
@@ -108,8 +111,12 @@ def main():
         mode, last = args.mode, None
         print('Музыкальная лаборатория · готовая нейросеть · без обучения и скачиваний')
         print('Загружаю модель один раз…', flush=True)
-        engine = DiscoveryEngine(args.source)
-        model = load_ranker(engine, args.run)
+        if (args.run / 'partition.json').exists():
+            from .honest_training import load_run
+            engine, model = load_run(args.run)
+        else:
+            engine = DiscoveryEngine(args.source)
+            model = load_ranker(engine, args.run)
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
             last = generate(engine, model, lines, known, mode, strict=args.strict_matching)
