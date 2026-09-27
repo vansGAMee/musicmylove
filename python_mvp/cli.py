@@ -50,12 +50,17 @@ def load_ranker(engine, run):
     return model
 
 
-def open_engine(run, source):
+def open_engine(run, source, *, inference_only=False):
     run = Path(run)
     if (run / 'refinement.json').exists():
         from .refine_ranker import load_refined
         return load_refined(run)
     if (run / 'partition.json').exists():
+        if (run / 'recovery.json').exists():
+            from .resume_training import verify_recovery, load_recovered
+            if inference_only:
+                return load_recovered(run)
+            verify_recovery(run)
         from .honest_training import load_run
         return load_run(run)
     engine = DiscoveryEngine(source)
@@ -177,7 +182,7 @@ def main():
         print(f'Эксперимент: {args.run}')
         print('Загружаю модель один раз…', flush=True)
         checkpoint = fingerprint(args.run / 'ranker.pt')
-        engine, model = open_engine(args.run, args.source)
+        engine, model = open_engine(args.run, args.source, inference_only=True)
         if checkpoint != fingerprint(args.run / 'ranker.pt'):
             raise RuntimeError('Общая модель изменилась во время загрузки. Перезапусти CLI.')
         def make_playlist(selected_focus=None):
@@ -259,7 +264,15 @@ def main():
                     print('\n'.join(unresolved) or 'Все треки распознаны.')
                 elif action == '8':
                     from .coverage import diagnose
-                    report = diagnose(engine, validate_lines(lines))
+                    coverage_lines = validate_lines(lines)
+                    coverage_engine = engine
+                    if hasattr(engine, 'raw_data_path'):
+                        from types import SimpleNamespace
+                        from .ranker_data import load_coverage_data
+                        print('Проверяю исходные данные потоком, без загрузки всей истории в память…', flush=True)
+                        coverage_engine = SimpleNamespace(tracks=engine.tracks, meta=engine.meta,
+                            data=load_coverage_data(engine.raw_data_path, engine.meta, coverage_lines))
+                    report = diagnose(coverage_engine, coverage_lines)
                     target = args.feedback/'coverage.json'
                     write_json(target, report)
                     print(report['counts']); print(f'Подробности: {target}')

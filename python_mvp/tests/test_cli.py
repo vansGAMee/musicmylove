@@ -77,7 +77,7 @@ def test_interactive_focus_invalid_selection_and_reset(tmp_path, monkeypatch, ca
         return values, set(range(5)), {}
     engine = SimpleNamespace(tracks=tracks, embeddings=torch.eye(5), features=features,
                              score=lambda model, values:values[:,0].copy())
-    monkeypatch.setattr(cli,'open_engine',lambda *a:(engine,None))
+    monkeypatch.setattr(cli,'open_engine',lambda *a,**kw:(engine,None))
     commands = iter(['ещё как 1 99', 'еще как 1 2', '3', 'весь профиль', '0'])
     monkeypatch.setattr('builtins.input',lambda *a:next(commands))
     monkeypatch.setattr('sys.argv',['cli',str(library),'--run',str(run),'--output',str(tmp_path/'out'),
