@@ -100,6 +100,17 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
     if not seeds:
         raise ValueError('Ни один трек не распознан однозначно. Попробуй другой список или точные Artist - Title.')
     features, candidates, _ = engine.features(seeds)
+    title, cap, share = MODES[mode]
+    seed_lines = [engine.tracks[i]['artist'] + ' - ' + engine.tracks[i]['title']
+                  for i in sorted(set(seeds) | set(library_profile['seeds']))]
+    library_ids = {engine.tracks[i]['id'] for i in library_profile['seeds']}
+    excluded = sorted(set(lines) | library_ids | set(inputs) | set(seed_lines) | set(known)
+                      | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
+    discovery_pool = None
+    if mode == '2' and hasattr(engine, 'graph'):
+        from .discovery_policy import prepare_discovery
+        discovery_pool = prepare_discovery(engine, seeds, excluded)
+        candidates = discovery_pool.candidates
     scores = engine.score(model, features)
     personal_features = np.column_stack((features, engine.embeddings.detach().cpu().numpy()))
     base_scores = scores.copy()
@@ -108,13 +119,11 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
     if personal and checkpoint:
         from .personal import adjust
         scores, personal_status = adjust(feedback_dir, checkpoint, personal_features, scores, candidates)
-    title, cap, share = MODES[mode]
-    seed_lines = [engine.tracks[i]['artist'] + ' - ' + engine.tracks[i]['title']
-                  for i in sorted(set(seeds) | set(library_profile['seeds']))]
-    library_ids = {engine.tracks[i]['id'] for i in library_profile['seeds']}
-    excluded = sorted(set(lines) | library_ids | set(inputs) | set(seed_lines) | set(known)
-                      | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
-    if hasattr(engine, 'select_playlist'):
+    evidence, policy = {}, {}
+    if discovery_pool is not None:
+        from .discovery_policy import select_discovery
+        ids, evidence, policy = select_discovery(discovery_pool, scores)
+    elif hasattr(engine, 'select_playlist'):
         ids = engine.select_playlist(scores, candidates, excluded, artist_cap=cap, familiar_share=share)
     else:
         ids = select_playlist(engine.tracks, scores, candidates, excluded, artist_cap=cap, familiar_share=share)
@@ -123,12 +132,13 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
              'id': engine.tracks[i]['id'], 'neural_score': float(scores[i]),
              'base_score': float(base_scores[i]), 'personal_features': personal_features[i].tolist(),
              'personal_scale': personal_scale,
+             **({'discovery_evidence': evidence[i]} if i in evidence else {}),
              'artist_not_in_library': match_key(engine.tracks[i]['artist']) not in familiar}
             for rank, i in enumerate(ids)]
     return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': inputs,
             'library_input': lines, 'focus': [dict(id=engine.tracks[i]['id'], artist=engine.tracks[i]['artist'],
                                                  title=engine.tracks[i]['title']) for i in seeds] if focus is not None else [],
-            'known_exclusions': excluded,
+            'known_exclusions': excluded, 'selection_policy': policy,
             'checkpoint_sha256': checkpoint, 'exposure_id': uuid.uuid4().hex, 'personal_status': personal_status,
             'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
@@ -148,7 +158,13 @@ def show(result, folder):
         print('Нераспознанные треки не формируют вкус; список сохранён в unresolved.txt.')
     for row in result['top50']:
         mark = '+' if row['artist_not_in_library'] else ' '
-        print(f"{row['rank']:2}. {mark} {row['artist']} — {row['title']}")
+        direction = ' ← ' + row['discovery_evidence']['seed_artist'] if row.get('discovery_evidence') else ''
+        print(f"{row['rank']:2}. {mark} {row['artist']} — {row['title']}{direction}")
+    policy = result.get('selection_policy', {})
+    if policy:
+        print('Стрелка — связь с исходным треком по слушателям и обученным векторам, не анализ звука.')
+        if policy['unrepresented_directions']:
+            print('Без продолжения при текущих ограничениях: ' + ', '.join(policy['unrepresented_directions']))
     print('+ исполнитель отсутствует в загруженных списках; это не гарантия незнакомой музыки.')
     if len(result['top50']) < 50:
         print(f"Под текущие ограничения подошло {len(result['top50'])} треков. Можно сменить режим.")
