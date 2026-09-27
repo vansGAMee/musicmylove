@@ -5,9 +5,9 @@ queried. Official API: https://listenbrainz.readthedocs.io/en/latest/users/api/c
 Use --collect to perform network requests and prepare a NEW dataset.
 """
 import argparse
-from collections import Counter
 import gc
 import hashlib
+import http.client
 import json
 import math
 from pathlib import Path
@@ -21,6 +21,27 @@ from .prepare_data import normalize, identify
 from .expand_data import prepare_bounded
 
 UA = 'MusicMyLoveResearch/0.4 (bounded public ListenBrainz history; local music recommendation experiment)'
+
+
+# This exact predecessor differs only in transport failure handling. Keep all
+# sampling, identity and preparation signatures strict when resuming its cache.
+LEGACY_COLLECTOR = '290796bd514c95a44b95022e6e54b778ca5198af0136b8a5d02091c4be856936'
+
+
+def compatible_config(saved, current):
+    if saved == current:
+        return True
+    previous = dict(saved)
+    implementation = dict(previous.get('implementation', {}))
+    if implementation.get('targeted_data.py') != LEGACY_COLLECTOR:
+        return False
+    implementation['targeted_data.py'] = current['implementation']['targeted_data.py']
+    previous['implementation'] = implementation
+    return previous == current
+
+
+class CollectionUnavailable(RuntimeError):
+    """Transient transport failure after bounded retries; cached pages survive."""
 
 
 def select_users(engine, coverage, limit):
@@ -59,13 +80,15 @@ def api_request(url):
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 return {'payload':{'listens':[]}, 'unavailable':True}
-            if error.code not in (429,500,502,503,504) or attempt == 3:
+            if error.code not in (429,500,502,503,504):
                 raise
+            if attempt == 3:
+                raise CollectionUnavailable('ListenBrainz unavailable after 4 attempts') from error
             retry = error.headers.get('Retry-After','1')
             time.sleep(min(60,max(2**attempt,int(retry) if retry.isdigit() else 1)))
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
             if attempt == 3:
-                raise
+                raise CollectionUnavailable('ListenBrainz connection failed after 4 attempts') from error
             time.sleep(2**attempt)
     raise RuntimeError('API request failed')
 
@@ -150,9 +173,10 @@ def main():
         'implementation':{n:fingerprint(ROOT/n) for n in ('targeted_data.py','coverage.py','expand_data.py','prepare_data.py')}}
     manifest = run/'targeting.json'
     if run.exists():
-        if not manifest.exists() or json.loads(manifest.read_text())['config'] != config:
+        if not manifest.exists() or not compatible_config(json.loads(manifest.read_text())['config'], config):
             raise RuntimeError('Targeted run belongs to another configuration; choose a new --run')
         plan = json.loads(manifest.read_text())
+        # Preserve the original sampling manifest and its implementation signature.
     else:
         from .cli import open_engine, read_path
         from .coverage import diagnose
@@ -195,7 +219,12 @@ def main():
         count=0
         with temporary.open('w') as destination:
             for i,uid in enumerate(plan['users']):
-                rows = collect_user(handles[uid],cache,plan['upper'],plan['upper']-args.days*86400,args.pages)
+                try:
+                    rows = collect_user(handles[uid],cache,plan['upper'],plan['upper']-args.days*86400,args.pages)
+                except CollectionUnavailable as error:
+                    raise SystemExit(f'{error}. Stopped at user {i+1}/{len(handles)}. '
+                                     'Cached pages are safe. Repeat the same command to resume; '
+                                     'do not delete the run directory. No dataset published.') from None
                 for row in rows:
                     destination.write(json.dumps(row,ensure_ascii=False)+'\n')
                 count += len(rows)
