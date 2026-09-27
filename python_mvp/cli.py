@@ -74,10 +74,24 @@ def export_playlist(result, output):
     return folder
 
 
+def focus_from_result(result, selection):
+    if not result or not result.get('top50'):
+        raise ValueError('Сначала получи плейлист.')
+    chosen = feedback.numbers(selection, len(result['top50']))
+    tracks = [row for row in result['top50'] if row['rank'] in chosen]
+    if len(tracks) != len(chosen) or any(not row.get('id') for row in tracks):
+        raise ValueError('В выдаче отсутствуют идентификаторы выбранных треков')
+    return sorted({row['id'] for row in tracks})
+
+
 def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedback.DEFAULT,
-             checkpoint=None, personal=True):
-    profile = resolve_profile(lines, engine.tracks, strict=strict)
+             checkpoint=None, personal=True, focus=None):
+    library_profile = resolve_profile(lines, engine.tracks, strict=strict)
+    inputs = sorted(set(focus)) if focus is not None else lines
+    profile = resolve_profile(inputs, engine.tracks, strict=True) if focus is not None else library_profile
     seeds, unresolved = profile['seeds'], profile['unresolved']
+    if focus is not None and unresolved:
+        raise ValueError('Выбранные треки отсутствуют в текущем каталоге. Получи новый плейлист.')
     if not seeds:
         raise ValueError('Ни один трек не распознан однозначно. Попробуй другой список или точные Artist - Title.')
     features, candidates, _ = engine.features(seeds)
@@ -90,7 +104,11 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
         from .personal import adjust
         scores, personal_status = adjust(feedback_dir, checkpoint, personal_features, scores, candidates)
     title, cap, share = MODES[mode]
-    excluded = sorted(set(lines) | set(known) | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
+    seed_lines = [engine.tracks[i]['artist'] + ' - ' + engine.tracks[i]['title']
+                  for i in sorted(set(seeds) | set(library_profile['seeds']))]
+    library_ids = {engine.tracks[i]['id'] for i in library_profile['seeds']}
+    excluded = sorted(set(lines) | library_ids | set(inputs) | set(seed_lines) | set(known)
+                      | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
     if hasattr(engine, 'select_playlist'):
         ids = engine.select_playlist(scores, candidates, excluded, artist_cap=cap, familiar_share=share)
     else:
@@ -102,12 +120,17 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
              'personal_scale': personal_scale,
              'artist_not_in_library': match_key(engine.tracks[i]['artist']) not in familiar}
             for rank, i in enumerate(ids)]
-    return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': lines, 'known_exclusions': excluded,
+    return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': inputs,
+            'library_input': lines, 'focus': [dict(id=engine.tracks[i]['id'], artist=engine.tracks[i]['artist'],
+                                                 title=engine.tracks[i]['title']) for i in seeds] if focus is not None else [],
+            'known_exclusions': excluded,
             'checkpoint_sha256': checkpoint, 'exposure_id': uuid.uuid4().hex, 'personal_status': personal_status,
             'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
 
 def show(result, folder):
+    if result.get('focus'):
+        print('Направление: ' + '; '.join(t['artist'] + ' — ' + t['title'] for t in result['focus']))
     if result.get('personal_status'):
         print(result['personal_status'])
     if result['status'] == 'LISTENER_BASELINE_NO_ACCEPTED_NEURAL_GAIN':
@@ -148,7 +171,8 @@ def main():
             load_ranker(None, args.run)
         lines = read_path(args.library) if args.library else []
         known = feedback.import_known(args.feedback, args.known) if args.known else feedback.known_lines(args.feedback)
-        mode, last = args.mode, None
+        mode, last, focus = args.mode, None, None
+        explored = set()
         print('Музыкальная лаборатория · готовый рекомендатель · без обучения и скачиваний')
         print(f'Эксперимент: {args.run}')
         print('Загружаю модель один раз…', flush=True)
@@ -156,10 +180,10 @@ def main():
         engine, model = open_engine(args.run, args.source)
         if checkpoint != fingerprint(args.run / 'ranker.pt'):
             raise RuntimeError('Общая модель изменилась во время загрузки. Перезапусти CLI.')
-        def make_playlist():
-            return generate(engine, model, validate_lines(lines), known, mode,
+        def make_playlist(selected_focus=None):
+            return generate(engine, model, validate_lines(lines), sorted(set(known) | explored), mode,
                             strict=args.strict_matching, feedback_dir=args.feedback,
-                            checkpoint=checkpoint, personal=not args.no_personal)
+                            checkpoint=checkpoint, personal=not args.no_personal, focus=selected_focus)
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
             last = make_playlist()
@@ -168,15 +192,28 @@ def main():
             return 0
         while True:
             print(f'Профиль: {len(lines)} треков · уже знакомое: {len(known)} · {MODES[mode][0]}')
+            if focus is not None:
+                print(f'Поиск по выбранным трекам: {len(focus)}. Вернуться: весь профиль')
             print('1 Файл  2 Вставить треки  3 Получить плейлист  4 Режим\n'
                   '5 Загрузить уже знакомое  6 Отметить знакомые из выдачи  7 Нераспознанные\n'
                   '8 Покрытие графа  9 Мои оценки  0 Выход\n'
-                  'Оценки: лайк 1 3-5 · дизлайк 8 · знаю 2 · новое 3 · сброс 8 · отмена')
+                  'Оценки: лайк 1 3-5 · дизлайк 8 · знаю 2 · новое 3 · сброс 8 · отмена\n'
+                  'Направить поиск: ещё как 3 7 12 · Вернуться: весь профиль')
             action = input('> ').strip()
             try:
                 words = action.split(maxsplit=1)
                 actions = {'лайк': 'like', 'дизлайк': 'dislike', 'знаю': 'known', 'новое': 'new', 'сброс': 'clear'}
-                if words and words[0] in actions:
+                direction = action.lower().replace('ё', 'е').split()
+                if direction[:2] == ['еще', 'как'] or direction == ['весь', 'профиль']:
+                    chosen = focus_from_result(last, ' '.join(direction[2:])) if direction[:2] == ['еще', 'как'] else None
+                    result = make_playlist(chosen)
+                    folder = export_playlist(result, args.output)
+                    focus, last = chosen, result
+                    explored.update(chosen or [])
+                    explored.update(t['artist'] + ' - ' + t['title'] for t in result['focus'])
+                    show(last, folder)
+                    continue
+                elif words and words[0] in actions:
                     if len(words) != 2:
                         raise ValueError('Добавь номера треков из последней выдачи')
                     count = feedback.record(args.feedback, last, actions[words[0]], words[1])
@@ -187,9 +224,9 @@ def main():
                     print('Последнее действие с оценками или импортом знакомого отменено.')
                 elif action == '0':
                     return 0
-                if action == '1':
+                elif action == '1':
                     value = input('Путь к JSON/CSV/TXT [~/Downloads/liked.json]: ').strip() or '~/Downloads/liked.json'
-                    lines = read_path(value); last = None
+                    lines = read_path(value); last = focus = None
                     print(f'Загружено {len(lines)} треков. Нажми 3 для выдачи.')
                 elif action == '2':
                     print('Вставь Artist - Title, по одному на строку. Пустая строка завершает ввод.')
@@ -199,9 +236,9 @@ def main():
                         if not line.strip():
                             break
                         pasted.append(line)
-                    lines = validate_lines(pasted); last = None
+                    lines = validate_lines(pasted); last = focus = None
                 elif action == '3':
-                    last = make_playlist()
+                    last = make_playlist(focus)
                     show(last, export_playlist(last, args.output))
                 elif action == '4':
                     print('\n'.join(f'{key} {value[0]}' for key, value in MODES.items()))
