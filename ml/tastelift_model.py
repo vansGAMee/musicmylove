@@ -320,7 +320,7 @@ def train_model(dataset, epochs=40, checkpoint_dir=Path("data/cache/tastelift/ch
         optimizer.load_state_dict(checkpoint["optimizer"])
         torch.set_rng_state(checkpoint["torch_rng"].cpu())
         if device.startswith("cuda"):
-            torch.cuda.set_rng_state_all(checkpoint["cuda_rng"])
+            torch.cuda.set_rng_state_all([s.cpu() if isinstance(s, torch.Tensor) else s for s in checkpoint["cuda_rng"]])
         start, history, best = checkpoint["epoch"], checkpoint["history"], checkpoint["best"]
     tracks_by_band: dict[int, list[int]] = {}
     for i, track in enumerate(model.tracks):

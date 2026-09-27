@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-09-23T21:25:00Z",
+  "policy": {
+    "anti_piracy": "No scraping of copyrighted commercial streaming services (YouTube, Spotify, etc.). No illegal bulk audio downloading.",
+    "provenance_enforced": "All audio must have documented Creative Commons or Public Domain licensing with explicit provenance.",
+    "modality_masking": "Tracks without verified audio have audio_available=False with explicit modality masking, never zero-padding or fake embeddings."
+  },
+  "sources": [
+    {
+      "source": "Free Music Archive (FMA) Dataset",
+      "license": "Creative Commons (CC BY, CC BY-NC, CC BY-SA, CC0, per-track license preserved in metadata)",
+      "allowed_usage": "Music Information Retrieval, academic research, representation learning",
+      "commercial_restriction": "Non-commercial for NC tracks; commercial permitted for CC BY / CC0 tracks",
+      "download_method": "Direct HTTPS download from official UNIL/EPFL repository",
+      "urls": [
+        "https://os.unil.cloud.switch.ch/fma/fma_metadata.zip",
+        "https://os.unil.cloud.switch.ch/fma/fma_small.zip"
+      ],
+      "track_count": 8000,
+      "duration": "8,000 clips of 30 seconds each (~66.7 hours)",
+      "audio_format": "MP3 44.1kHz stereo, 320kbps CBR/VBR",
+      "mapping_identifiers": "FMA track_id, artist_name, track_title, cross-referenceable to MusicBrainz by normalized artist + title",
+      "proof_url": "https://github.com/mdeff/fma",
+      "proof_date": "2026-09-23",
+      "status": "VERIFIED_ACCESSIBLE"
+    },
+    {
+      "source": "MTG-Jamendo Dataset",
+      "license": "Creative Commons (CC BY, CC BY-SA, CC BY-NC, CC BY-NC-SA, per-track)",
+      "allowed_usage": "Music auto-tagging, representation learning, research",
+      "commercial_restriction": "Varies by track; strictly non-commercial for NC tracks",
+      "download_method": "MTG download scripts / Zenodo archive 3826813",
+      "urls": [
+        "https://mtg.github.io/mtg-jamendo-dataset/",
+        "https://zenodo.org/records/3826813"
+      ],
+      "track_count": 55708,
+      "duration": ">3000 hours full audio; raw_30s subset ~464 hours",
+      "audio_format": "MP3 320kbps",
+      "mapping_identifiers": "Jamendo track ID, artist name, track title, tags",
+      "proof_url": "https://zenodo.org/records/3826813",
+      "proof_date": "2026-09-23",
+      "status": "VERIFIED_ACCESSIBLE"
+    },
+    {
+      "source": "MagnaTagATune (Magnatune Label)",
+      "license": "Creative Commons Attribution-NonCommercial-ShareAlike 3.0 (CC BY-NC-SA 3.0)",
+      "allowed_usage": "Research and non-commercial MIR benchmarking",
+      "commercial_restriction": "Strictly non-commercial",
+      "download_method": "HTTP archive download from academic mirrors",
+      "urls": [
+        "http://mirg.city.ac.uk/codeapps/the-magnatagatune-dataset"
+      ],
+      "track_count": 25863,
+      "duration": "25,863 clips of 29 seconds each (~208 hours)",
+      "audio_format": "MP3 32kHz mono",
+      "mapping_identifiers": "Magnatune artist, track, album, tag vector",
+      "proof_url": "http://mirg.city.ac.uk/codeapps/the-magnatagatune-dataset",
+      "proof_date": "2026-09-23",
+      "status": "VERIFIED_ACCESSIBLE"
+    },
+    {
+      "source": "Internet Archive Music Dataset (IAMD)",
+      "license": "Creative Commons and Public Domain (CC0, CC BY, CC BY-SA, CC BY-NC-SA)",
+      "allowed_usage": "Music representation learning and captioning research",
+      "commercial_restriction": "Varies by collection; non-commercial safe",
+      "download_method": "Internet Archive item download / API",
+      "urls": [
+        "https://archive.org/details/netlabels"
+      ],
+      "track_count": 100000,
+      "duration": ">34,000 hours",
+      "audio_format": "MP3/FLAC/OGG",
+      "mapping_identifiers": "MusicBrainz Recording MBID, Internet Archive item ID, artist, title",
+      "proof_url": "https://arxiv.org/abs/2609.20870",
+      "proof_date": "2026-09-23",
+      "status": "VERIFIED_ACCESSIBLE"
+    }
+  ]
+}

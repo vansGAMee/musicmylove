@@ -1,0 +1,106 @@
+[
+  {
+    "epoch": 1,
+    "loss": 1.2901064654191334,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.3076923076923077,
+      "accuracy_at_5": 0.6153846153846154,
+      "mrr": 0.4727744477744477,
+      "embedding_std": 0.036966681480407715,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 2,
+    "loss": 0.9905015826225281,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.46153846153846156,
+      "accuracy_at_5": 0.5384615384615384,
+      "mrr": 0.5413308913308913,
+      "embedding_std": 0.04786539450287819,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 3,
+    "loss": 1.013789673646291,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.46153846153846156,
+      "accuracy_at_5": 0.6923076923076923,
+      "mrr": 0.5576923076923077,
+      "embedding_std": 0.045719925314188004,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 4,
+    "loss": 0.9139808813730875,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.38461538461538464,
+      "accuracy_at_5": 0.7692307692307693,
+      "mrr": 0.5493589743589743,
+      "embedding_std": 0.05639209970831871,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 5,
+    "loss": 1.2525268197059631,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5384615384615384,
+      "accuracy_at_5": 0.7692307692307693,
+      "mrr": 0.6558025308025308,
+      "embedding_std": 0.04619675502181053,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 6,
+    "loss": 1.1577556431293488,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5384615384615384,
+      "accuracy_at_5": 0.7692307692307693,
+      "mrr": 0.6675546675546676,
+      "embedding_std": 0.04227514564990997,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 7,
+    "loss": 0.9580528537432352,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.46153846153846156,
+      "accuracy_at_5": 0.7692307692307693,
+      "mrr": 0.6300699300699301,
+      "embedding_std": 0.052312176674604416,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  },
+  {
+    "epoch": 8,
+    "loss": 0.886104941368103,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.6153846153846154,
+      "accuracy_at_5": 0.7692307692307693,
+      "mrr": 0.7078477078477078,
+      "embedding_std": 0.059056684374809265,
+      "covariance_matrix_rank": 12,
+      "tracks_evaluated": 13
+    }
+  }
+]
