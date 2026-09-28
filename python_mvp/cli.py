@@ -185,6 +185,7 @@ def main():
     parser.add_argument('library', nargs='?', help='JSON, CSV или TXT; необязательно')
     parser.add_argument('--known', help='Полная библиотека для исключения уже знакомого')
     parser.add_argument('--run', type=Path, default=default_run())
+    parser.add_argument('--joint', type=Path, help='Компактная обученная граф+звук модель (папка browser)')
     parser.add_argument('--source', type=Path, default=ROOT / 'data/main')
     parser.add_argument('--output', type=Path, default=ROOT / 'data/cli-playlists')
     parser.add_argument('--mode', choices=MODES, default='1')
@@ -200,23 +201,30 @@ def main():
         parser.error('--once требует путь к библиотеке')
     try:
         # Check before loading large artifacts, and never invoke training/evaluation.
-        if not (args.run / 'ranker.pt').exists():
+        if not args.joint and not (args.run / 'ranker.pt').exists():
             load_ranker(None, args.run)
         lines = read_path(args.library) if args.library else []
         known = feedback.import_known(args.feedback, args.known) if args.known else feedback.known_lines(args.feedback)
         mode, last, focus = args.mode, None, None
         explored = set()
         print('Музыкальная лаборатория · готовый рекомендатель · без обучения и скачиваний')
-        print(f'Эксперимент: {args.run}')
+        print(f'Эксперимент: {args.joint or args.run}')
         print('Загружаю модель один раз…', flush=True)
-        checkpoint = fingerprint(args.run / 'ranker.pt')
-        engine, model = open_engine(args.run, args.source, inference_only=True)
-        if checkpoint != fingerprint(args.run / 'ranker.pt'):
-            raise RuntimeError('Общая модель изменилась во время загрузки. Перезапусти CLI.')
+        if args.joint:
+            from .joint import JointEngine
+            engine, model = JointEngine(args.joint), None
+            checkpoint = fingerprint(args.joint / 'manifest.json')
+            print('Обученная граф+звук модель: ' + engine.refinement_status)
+            print('Аудиофильтр не используется. Старый личный адаптер отключён; оценки сохраняются.')
+        else:
+            checkpoint = fingerprint(args.run / 'ranker.pt')
+            engine, model = open_engine(args.run, args.source, inference_only=True)
+            if checkpoint != fingerprint(args.run / 'ranker.pt'):
+                raise RuntimeError('Общая модель изменилась во время загрузки. Перезапусти CLI.')
         def make_playlist(selected_focus=None):
             return generate(engine, model, validate_lines(lines), sorted(set(known) | explored), mode,
                             strict=args.strict_matching, feedback_dir=args.feedback,
-                            checkpoint=checkpoint, personal=not args.no_personal, focus=selected_focus,
+                            checkpoint=checkpoint, personal=not args.no_personal and not args.joint, focus=selected_focus,
                             sound_cache=None if args.no_sound else SoundCache(args.sound_cache))
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
@@ -275,6 +283,9 @@ def main():
                     last = make_playlist(focus)
                     show(last, export_playlist(last, args.output))
                 elif action == '4':
+                    if args.joint:
+                        print('Совместная модель использует один обученный порядок без старых квот и аудиофильтра.')
+                        continue
                     print('\n'.join(f'{key} {value[0]}' for key, value in MODES.items()))
                     chosen = input('Режим [1/2/3]: ').strip()
                     if chosen not in MODES:
@@ -292,6 +303,9 @@ def main():
                     unresolved = resolve_profile(validate_lines(lines), engine.tracks, strict=args.strict_matching)['unresolved']
                     print('\n'.join(unresolved) or 'Все треки распознаны.')
                 elif action == '8':
+                    if args.joint:
+                        print(f'Каталог: {len(engine.tracks)}; со звуком: {int(engine.audio.sum())}; пакет: {engine.manifest["bytes"] / 1048576:.1f} MiB')
+                        continue
                     from .coverage import diagnose
                     coverage_lines = validate_lines(lines)
                     coverage_engine = engine
@@ -308,6 +322,9 @@ def main():
                 elif action == '9':
                     import shlex
                     print(json.dumps(feedback.summary(args.feedback), ensure_ascii=False))
+                    if args.joint:
+                        print('Оценки сохранены. Старый персональный адаптер не совместим с совместной моделью.')
+                        continue
                     print('Обновить личную модель отдельной командой:')
                     print('python -m python_mvp.personal train --run ' + shlex.quote(str(args.run))
                           + ' --feedback ' + shlex.quote(str(args.feedback)))
