@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import time
 import urllib.error
@@ -32,13 +33,26 @@ class PreviewSearch:
     def __init__(self,root):
         self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.last=0.
 
+    def cache_path(self,track):
+        # Preserve identity boundaries: ('A B','C') is not ('A','B C').
+        identity=json.dumps([track['artist'],track['title']],ensure_ascii=False)
+        return self.root/(hashlib.sha256(identity.encode()).hexdigest()+'.json')
+
+    def invalidate(self,track):
+        self.cache_path(track).unlink(missing_ok=True)
+
     def search(self,track):
         query=track['artist']+' '+track['title']
-        key=hashlib.sha256(query.encode()).hexdigest();path=self.root/(key+'.json')
+        path=self.cache_path(track)
         if path.exists():
             saved=json.loads(path.read_text())
-            # Preview URLs expire; keep metadata for one day, vectors indefinitely.
-            if time.time()-saved['saved_at']<86400:return saved['data']
+            result=saved['data']
+            expires=saved['saved_at']+(600 if result else 86400)
+            if result:
+                token=urllib.parse.parse_qs(urllib.parse.urlsplit(result['preview']).query).get('hdnea',[''])[0]
+                signed_expiry=re.search(r'(?:^|~)exp=(\d+)(?:~|$)',token)
+                if signed_expiry:expires=min(expires,int(signed_expiry.group(1))-30)
+            if time.time()<expires:return result
         url=API+'?'+urllib.parse.urlencode(dict(q=query,limit=25))
         for attempt in range(3):
             time.sleep(max(0,.55-(time.monotonic()-self.last)));self.last=time.monotonic()
@@ -106,6 +120,7 @@ def main():
                                       identity='exact artist/title and unique provider ISRC; not fingerprint verified')],cache,get_encoder,limit=1)
                         report['encoded']+=r['encoded'];report['errors'].extend(r['failed'])
                         if r['failed']:
+                            search.invalidate(track)
                             consecutive_errors+=1
                             if consecutive_errors>=5:raise ImportError('Five preview failures; stop and retry later')
                         else:consecutive_errors=0

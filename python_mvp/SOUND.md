@@ -61,7 +61,9 @@ training is required.
 Automatic lookup uses https://api.deezer.com/search and only exact normalized
 artist + full title matches with a single nonempty provider ISRC among returned
 results. Different versions, ambiguous results or missing previews are skipped.
-Provider IDs, ISRC and source identity are saved. This is **metadata matching, not
+Provider IDs, ISRC and source identity are saved. Preview URL caches respect signed
+expiry with a safety margin and at most ten minutes; failed downloads invalidate
+the lookup so a restart obtains a fresh URL. This is **metadata matching, not
 fingerprint verification against the MusicBrainz recording**. No chart rank,
 provider recommendation, Spotify data or LLM output enters ranking. Provider
 availability/access limits can change; network requests have a descriptive

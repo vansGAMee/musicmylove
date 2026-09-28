@@ -123,7 +123,8 @@ def test_collector_stops_after_repeated_preview_failures(tmp_path,monkeypatch):
     class Search:
         def __init__(self,*args):pass
         def search(self,t):return dict(id=1,artist={'name':'A'},title='T',isrc='x',preview='https://example/a')
-    calls=[]
+        def invalidate(self,t):invalidated.append(t['id'])
+    calls=[];invalidated=[]
     def failing_build(*args,**kwargs):
         calls.append(1);return dict(encoded=0,failed=[dict(error='unavailable')])
     monkeypatch.setattr(collect,'PreviewSearch',Search)
@@ -132,3 +133,44 @@ def test_collector_stops_after_repeated_preview_failures(tmp_path,monkeypatch):
     monkeypatch.setattr(sys,'argv',['sound_collect','--run',str(run),'--cache',str(tmp_path/'cache'),'--encode'])
     with pytest.raises(ImportError,match='Five preview failures'):collect.main()
     assert len(calls)==5
+    assert len(invalidated)==5
+
+
+def test_search_cache_cannot_reuse_another_artist_title_pair(tmp_path,monkeypatch):
+    import json,time
+    from python_mvp.sound_collect import PreviewSearch
+    import urllib.request
+    answers=iter([dict(data=[dict(id=1,artist={'name':'A B'},title='C',isrc='one',preview='https://cdn/one')]),
+                  dict(data=[dict(id=2,artist={'name':'A'},title='B C',isrc='two',preview='https://cdn/two')])])
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self,*args):return json.dumps(next(answers)).encode()
+    monkeypatch.setattr(urllib.request,'urlopen',lambda *a,**k:Response())
+    monkeypatch.setattr(time,'sleep',lambda *a:None)
+    search=PreviewSearch(tmp_path)
+    assert search.search(dict(artist='A B',title='C'))['id']==1
+    assert search.search(dict(artist='A',title='B C'))['id']==2
+
+
+def test_search_refreshes_expiring_signed_preview(tmp_path,monkeypatch):
+    import json,time,urllib.request
+    from python_mvp.sound_collect import PreviewSearch
+    clock=[1000.];calls=[]
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self,*args):
+            calls.append(1)
+            return json.dumps(dict(data=[dict(id=len(calls),artist={'name':'A'},title='B',
+                isrc='same',preview=f'https://cdn/audio?hdnea=exp={int(clock[0]+120)}~acl=x')])).encode()
+    monkeypatch.setattr(urllib.request,'urlopen',lambda *a,**k:Response())
+    monkeypatch.setattr(time,'time',lambda:clock[0]);monkeypatch.setattr(time,'sleep',lambda *a:None)
+    search=PreviewSearch(tmp_path);track=dict(artist='A',title='B')
+    assert search.search(track)['id']==1
+    clock[0]+=60
+    assert search.search(track)['id']==1
+    clock[0]+=70
+    assert search.search(track)['id']==2
+    search.invalidate(track)
+    assert search.search(track)['id']==3
