@@ -130,6 +130,7 @@ def test_collector_stops_after_repeated_preview_failures(tmp_path,monkeypatch):
     monkeypatch.setattr(collect,'PreviewSearch',Search)
     monkeypatch.setattr(collect,'ClapEncoder',lambda *args:object())
     monkeypatch.setattr(collect,'build',failing_build)
+    monkeypatch.setattr(collect,'fetch_preview',lambda url,path:path.write_bytes(b'preview'))
     monkeypatch.setattr(sys,'argv',['sound_collect','--run',str(run),'--cache',str(tmp_path/'cache'),'--encode'])
     with pytest.raises(ImportError,match='Five preview failures'):collect.main()
     assert len(calls)==5

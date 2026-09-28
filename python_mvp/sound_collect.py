@@ -3,6 +3,8 @@ import argparse
 import hashlib
 import json
 import re
+import threading
+import tempfile
 from pathlib import Path
 import time
 import urllib.error
@@ -11,7 +13,9 @@ import urllib.request
 from .recommend import match_key
 from .sound import SoundCache,DEFAULT_CACHE
 from .sound_encoder import ClapEncoder,MODEL_DIR
-from .sound_import import build
+from .sound_import import build, fetch_preview
+from .sound_prefetch import preview_jobs
+from contextlib import nullcontext
 
 API='https://api.deezer.com/search'
 UA='MusicMyLove/1.0 (bounded music preview research)'
@@ -31,7 +35,7 @@ def choose_preview(track,results):
 
 class PreviewSearch:
     def __init__(self,root):
-        self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.last=0.
+        self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True);self.last=0.;self.rate_lock=threading.Lock()
 
     def cache_path(self,track):
         # Preserve identity boundaries: ('A B','C') is not ('A','B C').
@@ -55,7 +59,8 @@ class PreviewSearch:
             if time.time()<expires:return result
         url=API+'?'+urllib.parse.urlencode(dict(q=query,limit=25))
         for attempt in range(3):
-            time.sleep(max(0,.55-(time.monotonic()-self.last)));self.last=time.monotonic()
+            with self.rate_lock:
+                time.sleep(max(0,.55-(time.monotonic()-self.last)));self.last=time.monotonic()
             try:
                 req=urllib.request.Request(url,headers={'User-Agent':UA})
                 with urllib.request.urlopen(req,timeout=15) as response:
@@ -65,7 +70,10 @@ class PreviewSearch:
                 if 'error' in data:raise ValueError(f'Preview API error: {data["error"]}')
                 result=choose_preview(track,data.get('data',[]))
                 payload=dict(saved_at=time.time(),data=result)
-                temp=path.with_suffix('.tmp');temp.write_text(json.dumps(payload));temp.replace(path)
+                with tempfile.NamedTemporaryFile(mode='w',dir=self.root,delete=False,suffix='.tmp') as f:
+                    json.dump(payload,f);temp=Path(f.name)
+                try:temp.replace(path)
+                finally:temp.unlink(missing_ok=True)
                 return result
             except (urllib.error.URLError,TimeoutError,ValueError):
                 if attempt==2:raise
@@ -79,10 +87,12 @@ def main():
     p.add_argument('--model-dir',type=Path,default=MODEL_DIR)
     p.add_argument('--limit',type=int,default=100,help='Total prefix of deterministic catalog sample; increase to expand coverage; reruns resume this target')
     p.add_argument('--library',type=Path,help='Process matched favorite tracks before the rest of the catalog')
+    p.add_argument('--workers',type=int,default=4,help='Network prefetch workers (1–8); one GPU encoder')
     p.add_argument('--encode',action='store_true',help='Download previews temporarily and compute vectors')
     p.add_argument('--device',choices=['auto','cpu','cuda'],default='auto')
     args=p.parse_args()
     if args.limit<1:p.error('--limit must be positive')
+    if not 1<=args.workers<=8:p.error('--workers must be between 1 and 8')
     tracks=json.loads((args.run/'data/graph.json').read_text())['tracks']
     priority=set()
     if args.library:
@@ -106,34 +116,40 @@ def main():
                 catalog_size=catalog_size,priority_profile_tracks=len(priority))
     start=time.monotonic();consecutive_errors=0
     try:
-        for track in tracks:
-            report['inspected']+=1
-            if cache.get(track['id']) is not None:
-                report['cached']+=1;continue
-            try:
-                result=search.search(track)
-                if result:
-                    report['matched']+=1
-                    if args.encode:
-                        r=build([dict(track_id=track['id'],url=result['preview'],provider='deezer',provider_id=result['id'],
-                                      isrc=result.get('isrc'),artist=result['artist']['name'],title=result['title'],
-                                      identity='exact artist/title and unique provider ISRC; not fingerprint verified')],cache,get_encoder,limit=1)
-                        report['encoded']+=r['encoded'];report['errors'].extend(r['failed'])
-                        if r['failed']:
-                            search.invalidate(track)
-                            consecutive_errors+=1
-                            if consecutive_errors>=5:raise ImportError('Five preview failures; stop and retry later')
+        with (preview_jobs(tracks,cache,search,args.workers,fetch_preview) if args.encode else nullcontext(iter(tracks))) as jobs:
+            for job in jobs:
+                track=job.track if args.encode else job
+                report['inspected']+=1
+                if (job.cached if args.encode else cache.get(track['id']) is not None):
+                    report['cached']+=1;continue
+                try:
+                    if args.encode and job.error:
+                        if job.result:search.invalidate(track)
+                        raise job.error
+                    result=job.result if args.encode else search.search(track)
+                    if result:
+                        report['matched']+=1
+                        if args.encode:
+                            r=build([dict(track_id=track['id'],url=result['preview'],provider='deezer',provider_id=result['id'],
+                                          isrc=result.get('isrc'),artist=result['artist']['name'],title=result['title'],
+                                          identity='exact artist/title and unique provider ISRC; not fingerprint verified')],cache,get_encoder,limit=1,prepared_path=job.path,quiet=True)
+                            report['encoded']+=r['encoded'];report['errors'].extend(r['failed'])
+                            if r['failed']:
+                                search.invalidate(track)
+                                consecutive_errors+=1
+                                if consecutive_errors>=5:raise ImportError('Five preview failures; stop and retry later')
+                            else:consecutive_errors=0
                         else:consecutive_errors=0
-                    else:consecutive_errors=0
-                else:
-                    report['missing']+=1;consecutive_errors=0
-            except (OSError,ValueError,RuntimeError) as exc:
-                report['errors'].append(dict(track_id=track['id'],error=str(exc)))
-                consecutive_errors+=1
-                if consecutive_errors>=5:raise RuntimeError('Five consecutive failures; stop instead of hammering provider') from exc
-            if report['inspected']%10==0:
-                elapsed=time.monotonic()-start
-                print(f'{report["inspected"]}/{len(tracks)} matched={report["matched"]} encoded={report["encoded"]} cached={report["cached"]} elapsed={elapsed:.0f}s',flush=True)
+                    else:
+                        report['missing']+=1;consecutive_errors=0
+                except Exception as exc:
+                    if isinstance(exc,ImportError):raise
+                    report['errors'].append(dict(track_id=track['id'],error=str(exc)))
+                    consecutive_errors+=1
+                    if consecutive_errors>=5:raise RuntimeError('Five consecutive failures; stop instead of hammering provider') from exc
+                if report['inspected']%10==0:
+                    elapsed=time.monotonic()-start
+                    print(f'{report["inspected"]}/{len(tracks)} matched={report["matched"]} encoded={report["encoded"]} cached={report["cached"]} elapsed={elapsed:.0f}s',flush=True)
     finally:
         report['elapsed_seconds']=round(time.monotonic()-start,2)
         work=report['inspected']-report['cached']

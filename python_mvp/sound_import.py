@@ -68,8 +68,9 @@ def fetch_preview(url,destination):
     if duration(destination)>60:raise ValueError('Remote audio must be a preview <=60 seconds')
 
 
-def build(rows,cache,encoder_factory,limit=200):
+def build(rows,cache,encoder_factory,limit=200,*,prepared_path=None,quiet=False):
     if limit<1:raise ValueError('limit must be positive')
+    if prepared_path is not None and len(rows)!=1:raise ValueError('Prepared preview requires exactly one track')
     encoder=None;report=dict(encoded=0,cached=0,failed=[],remaining=max(0,len(rows)-limit))
     for number,row in enumerate(rows[:limit],1):
         tid=row['track_id']
@@ -79,8 +80,8 @@ def build(rows,cache,encoder_factory,limit=200):
             if 'url' in row and old and old[1]['source'].get('url')==row['url']:
                 report['cached']+=1;continue
             with tempfile.TemporaryDirectory(prefix='music-preview-') as temp:
-                path=Path(row['path']) if 'path' in row else Path(temp)/'preview.audio'
-                if 'url' in row:fetch_preview(row['url'],path)
+                path=Path(prepared_path) if prepared_path is not None else (Path(row['path']) if 'path' in row else Path(temp)/'preview.audio')
+                if 'url' in row and prepared_path is None:fetch_preview(row['url'],path)
                 digest=sha256(path)
                 if cache.current(tid,digest):report['cached']+=1;continue
                 if encoder is None:
@@ -98,7 +99,7 @@ def build(rows,cache,encoder_factory,limit=200):
             report['failed'].append(dict(track_id=tid,error=str(exc)))
             print(f'Failed {tid}: {exc}',flush=True)
 
-        print(f'{number}/{min(limit,len(rows))}: encoded={report["encoded"]}, cached={report["cached"]}',flush=True)
+        if not quiet:print(f'{number}/{min(limit,len(rows))}: encoded={report["encoded"]}, cached={report["cached"]}',flush=True)
     return report
 
 
