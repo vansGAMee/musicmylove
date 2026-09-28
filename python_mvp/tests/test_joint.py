@@ -72,3 +72,24 @@ def test_joint_small_optimization_and_checkpoint_reuse(tmp_path):
     state=fit(pack,tmp_path,'cpu',2,True)
     assert state['epoch']>=1 and np.isfinite(state['history'][0]['loss'])
     assert fit(pack,tmp_path,'cpu',2,True)['dev']==state['dev']
+
+
+def test_dev_matches_neural_scores_without_per_query_gpu_roundtrip(monkeypatch):
+    from python_mvp.joint import JointRanker,extras,select
+    from python_mvp.joint_training import evaluate
+    from python_mvp.evaluate import metrics
+    torch.manual_seed(8);n=75;m=JointRanker().eval();x=torch.randn(n,610)
+    x[:,608]=(torch.arange(n)%2).float();x[:,609]=torch.arange(n)/n
+    artists=np.arange(n)%30;families=np.arange(n)
+    tracks=[dict(id=str(i),artist=str(artists[i]),title=str(i)) for i in range(n)]
+    seeds=[0,1,2];ids=list(range(3,n));targets=[5,14,31]
+    with torch.no_grad():
+        z=m.encode(x)
+        v=m.score(z[seeds][None],z[ids][None],torch.tensor(extras(seeds,ids,artists,x[:,609].numpy(),x[:,608].numpy()))[None])[0].numpy()
+    scores=np.full(n,-1e9);scores[ids]=v
+    expected=metrics(select(ids,scores,tracks,families,artists),targets)['NDCG@50']
+    def unnecessary_roundtrip(*a,**k):raise AssertionError('Per-query GPU scoring must not be used')
+    monkeypatch.setattr(m,'score',unnecessary_roundtrip)
+    report=evaluate(m,x,dict(artists=artists,families=families,tracks=tracks,
+        dev=[dict(user='u',seeds=seeds,candidates=ids,targets=targets)]),'cpu')
+    assert report['u']==expected

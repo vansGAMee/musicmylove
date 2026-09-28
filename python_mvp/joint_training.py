@@ -7,7 +7,7 @@ import time
 import numpy as np
 import torch
 from torch.nn import functional as F
-from .joint import JointRanker,K,DIM,MAX_SEEDS,select_seeds,retrieve,extras,select
+from .joint import JointRanker,K,DIM,MAX_SEEDS,select_seeds,retrieve,extras,select,numpy_scores
 from .sound import SoundCache,DEFAULT_CACHE,CONTRACT,sha256
 from .honest_training import mapped_users,raw_protection,episode
 from .evaluate import metrics,paired_interval
@@ -81,14 +81,17 @@ def prepare(source,cache,run):
 
 
 def evaluate(model,x,pack,device):
-    with torch.no_grad():z=model.encode(x)
+    # One GPU transfer per evaluation; tiny per-profile scoring uses serving math.
+    with torch.no_grad():z=model.encode(x).cpu().numpy()
+    weights=dict(w1=model.rank[0].weight.detach().cpu().numpy(),b1=model.rank[0].bias.detach().cpu().numpy(),
+                 w2=model.rank[2].weight.detach().cpu().numpy(),b2=model.rank[2].bias.detach().cpu().numpy())
     results={}
     pop=x[:,609].cpu().numpy();audio=x[:,608].cpu().numpy()
     for q in pack['dev']:
         ids=q['candidates'];seeds=q['seeds'];value=0.
         if ids:
             extra=extras(seeds,ids,pack['artists'],pop,audio)
-            with torch.no_grad():scores=model.score(z[seeds][None],z[ids][None],torch.tensor(extra[None],device=device))[0].cpu().numpy()
+            scores=numpy_scores(z,seeds,ids,extra,weights)
             all_scores=np.full(len(x),-1e9);all_scores[ids]=scores
             ordered=select(ids,all_scores,pack['tracks'],pack['families'],pack['artists'])
             target={int(pack['families'][i]) for i in q['targets']}
@@ -119,9 +122,9 @@ def fit(pack,run,device,epochs,audio=True):
             score=model.score(zs,zc,extra,ma)
             loss=F.softplus(score[:,1]-score[:,0]).mean()
             opt.zero_grad();loss.backward();torch.nn.utils.clip_grad_norm_(model.parameters(),5);opt.step()
-            losses.append(float(loss.detach()))
+            losses.append(loss.detach())
         model.eval();report=evaluate(model,x,pack,device);quality=float(np.mean(list(report.values())))
-        row=dict(model=name,epoch=epoch+1,loss=float(np.mean(losses)),dev_ndcg50=quality)
+        row=dict(model=name,epoch=epoch+1,loss=float(torch.stack(losses).mean().cpu()),dev_ndcg50=quality)
         history.append(row);print(json.dumps(row),flush=True)
         if quality>best+1e-6:
             best=quality;stale=0;state=dict(weights=copy.deepcopy({k:v.cpu() for k,v in model.state_dict().items()}),dev=report,epoch=epoch+1)
