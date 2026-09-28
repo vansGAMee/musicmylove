@@ -1,0 +1,14 @@
+{
+  "status": "DEV_PASS",
+  "seed": 44,
+  "passed": true,
+  "validation": {
+    "accuracy_at_1": 0.75,
+    "accuracy_at_5": 1.0,
+    "mrr": 0.8361111111111111,
+    "embedding_std": 0.05693260207772255,
+    "covariance_matrix_rank": 11,
+    "tracks_evaluated": 12
+  },
+  "weights_updated": true
+}

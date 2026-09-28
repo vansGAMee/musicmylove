@@ -1,0 +1,22 @@
+{
+  "archive": {
+    "dump_id": "listenbrainz-dump-2660-20260913-000002-incremental",
+    "compressed_bytes": 239571172,
+    "sha256": "1220457d75b5ab661bb7ef5374f0ce3b0e47d11b9c69eabb04cac8279ee7c2e8",
+    "unique_users": 22144,
+    "active_users_at_threshold_20": 12149
+  },
+  "samples": [
+    {"seed": 41, "sampled": 500, "suitable": 394, "sample_sha256": "403ee064d47ea2f70ea202801df8da1c3a80313cad16bec0e679a98cacfd93f4"},
+    {"seed": 73, "sampled": 500, "excluded_from_first_sample": 500, "suitable": 396, "sample_sha256": "acc1cfaf0054a1078777755731f0f812ee04c91b61c5aed348b4150e97264e29"}
+  ],
+  "final_split": {
+    "counts": {"train": 671, "validation": 59, "test": 60},
+    "sha256": {
+      "train": "96d894bc9306c5d740af4c6b031b2a24031cb173e2e7e3dca978ef5963514ea4",
+      "validation": "6dd84e1a0f348d30742c03723ece406e4c937c43a11a1338a6488715a06044e9",
+      "test": "70240d0be3a560769a14a5d820c65ca6854c33d9e5fc5aff260b60c1bbadd244"
+    }
+  },
+  "privacy": "No usernames, profiles, or raw retrieval rows are committed."
+}

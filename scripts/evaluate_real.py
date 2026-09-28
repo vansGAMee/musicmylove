@@ -1,0 +1,66 @@
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+from ml.evaluate import aggregate_by_group, paired_bootstrap
+from ml.train_real import evaluate_rankers
+from scripts.train_real import load_partition
+
+
+def artifact_score(features, artifact):
+    values = list(features)
+    for index, layer in enumerate(artifact["layers"]):
+        values = [sum(weight * value for weight, value in zip(row, values)) + bias for row, bias in zip(layer["weight"], layer["bias"])]
+        if index < len(artifact["layers"]) - 1:
+            values = [max(0.0, value) for value in values]
+    residual = features[artifact["residual_feature"]] if artifact.get("residual_feature") is not None else 0.0
+    return artifact.get("residual_scale", 1.0) * values[0] + residual
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--split", default="data/manifests/real-splits.json")
+    parser.add_argument("--marker", default="data/manifests/frozen-test-evaluated.json")
+    parser.add_argument("--report", default="reports/evaluation.json")
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
+    marker = root / args.marker
+    if marker.exists():
+        raise SystemExit("frozen test was already evaluated; refusing repeated inspection")
+    splits = json.loads((root / args.split).read_text())
+    artifact_bytes = (root / "ml/model.json").read_bytes()
+    artifact = json.loads(artifact_bytes)
+    _, evaluations = load_partition(root, splits, "test")
+    if not evaluations:
+        raise SystemExit("real cached test examples are incomplete")
+    scorer = lambda values: artifact_score(values, artifact)
+    rankers = evaluate_rankers(evaluations, scorer)
+    selected_name = artifact["production_ranker"]
+    if selected_name == "ensemble":
+        selected_name = f"ensemble_{artifact['ensemble_alpha']:.1f}"
+    baselines = [name for name in ("max_similarity", "rrf")]
+    strongest_baseline = max(baselines, key=lambda name: rankers[name]["ndcg_at_20"])
+    per_example = [evaluate_rankers([evaluation], scorer) for evaluation in evaluations]
+    selected_ndcg = [row[selected_name]["ndcg_at_20"] for row in per_example]
+    baseline_ndcg = [row[strongest_baseline]["ndcg_at_20"] for row in per_example]
+    user_groups = [evaluation["user_index"] for evaluation in evaluations]
+    selected_user_ndcg = aggregate_by_group(selected_ndcg, user_groups)
+    baseline_user_ndcg = aggregate_by_group(baseline_ndcg, user_groups)
+    output = {
+        "scope": "frozen real-public-user cold-start test",
+        "evaluated_users": len(splits["test"]), "evaluated_examples": len(evaluations),
+        "rankers": rankers, "selected_production_ranker": selected_name,
+        "strongest_baseline": strongest_baseline,
+        "paired_bootstrap_unit": "user (mean of three examples)",
+        "paired_bootstrap_ndcg_delta_95_ci": paired_bootstrap(selected_user_ndcg, baseline_user_ndcg),
+        "per_example_ndcg": [{"selected": selected, "baseline": baseline} for selected, baseline in zip(selected_ndcg, baseline_ndcg)],
+        "average_candidate_pool_size": sum(len(row["candidates"]) for row in evaluations) / len(evaluations),
+        "external_retrieval_limitation": "ListenBrainz Labs is precomputed and may include held-out-user activity; metrics isolate only MusicMyLove reranking."
+    }
+    (root / args.report).write_text(json.dumps(output, indent=2) + "\n")
+    marker.write_text(json.dumps({"model_sha256": hashlib.sha256(artifact_bytes).hexdigest(), "evaluated_examples": len(evaluations)}) + "\n")
+    print(json.dumps(output))
+
+
+if __name__ == "__main__": main()

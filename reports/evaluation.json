@@ -1,0 +1,822 @@
+{
+  "scope": "frozen real-public-user cold-start test",
+  "evaluated_users": 60,
+  "evaluated_examples": 180,
+  "rankers": {
+    "max_similarity": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.00975206282875146,
+      "hit_rate_at_20": 0.06111111111111111,
+      "artist_diversity_at_20": 12.25
+    },
+    "rrf": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.013333333333333336,
+      "ndcg_at_20": 0.009681682386933897,
+      "hit_rate_at_20": 0.06666666666666667,
+      "artist_diversity_at_20": 12.144444444444444
+    },
+    "neural": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.018888888888888893,
+      "ndcg_at_20": 0.016517711823946814,
+      "hit_rate_at_20": 0.09444444444444444,
+      "artist_diversity_at_20": 12.177777777777777
+    },
+    "ensemble_0.1": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.014444444444444446,
+      "ndcg_at_20": 0.012419095274236411,
+      "hit_rate_at_20": 0.07222222222222222,
+      "artist_diversity_at_20": 12.122222222222222
+    },
+    "ensemble_0.2": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.016666666666666666,
+      "ndcg_at_20": 0.014860243957974906,
+      "hit_rate_at_20": 0.07777777777777778,
+      "artist_diversity_at_20": 12.061111111111112
+    },
+    "ensemble_0.3": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.015555555555555557,
+      "ndcg_at_20": 0.01338868582663909,
+      "hit_rate_at_20": 0.07222222222222222,
+      "artist_diversity_at_20": 12.066666666666666
+    },
+    "ensemble_0.4": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.016666666666666666,
+      "ndcg_at_20": 0.013813622037875645,
+      "hit_rate_at_20": 0.07777777777777778,
+      "artist_diversity_at_20": 12.03888888888889
+    },
+    "ensemble_0.5": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.017777777777777778,
+      "ndcg_at_20": 0.014615670598414263,
+      "hit_rate_at_20": 0.08333333333333333,
+      "artist_diversity_at_20": 12.05
+    },
+    "ensemble_0.6": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.02,
+      "ndcg_at_20": 0.015266428864035375,
+      "hit_rate_at_20": 0.09444444444444444,
+      "artist_diversity_at_20": 12.077777777777778
+    },
+    "ensemble_0.7": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.02,
+      "ndcg_at_20": 0.015663696232293436,
+      "hit_rate_at_20": 0.09444444444444444,
+      "artist_diversity_at_20": 12.122222222222222
+    },
+    "ensemble_0.8": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.021111111111111112,
+      "ndcg_at_20": 0.016976904237960107,
+      "hit_rate_at_20": 0.09444444444444444,
+      "artist_diversity_at_20": 12.205555555555556
+    },
+    "ensemble_0.9": {
+      "retrieval_recall": 0.04888888888888889,
+      "recall_at_20": 0.018888888888888893,
+      "ndcg_at_20": 0.01650670467228041,
+      "hit_rate_at_20": 0.09444444444444444,
+      "artist_diversity_at_20": 12.2
+    }
+  },
+  "selected_production_ranker": "neural",
+  "strongest_baseline": "max_similarity",
+  "paired_bootstrap_unit": "user (mean of three examples)",
+  "paired_bootstrap_ndcg_delta_95_ci": [
+    0.0011920038819595053,
+    0.013308235216925519
+  ],
+  "per_example_ndcg": [
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.1208113026994942,
+      "baseline": 0.08681077623592635
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.21398626473452756,
+      "baseline": 0.22904407792782547
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.16958010263680806,
+      "baseline": 0.16958010263680806
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.21398626473452756,
+      "baseline": 0.1208113026994942
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.08133484538841967,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.07721668828275381
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.3391602052736161,
+      "baseline": 0.21398626473452756
+    },
+    {
+      "selected": 0.13120507751234178,
+      "baseline": 0.19602912984299106
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.08297572808511901,
+      "baseline": 0.13120507751234178
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.10209739512291163,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.21398626473452756,
+      "baseline": 0.11305340175787204
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.14606834984270645,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.08681077623592635,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.3391602052736161,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.16958010263680806,
+      "baseline": 0.3391602052736161
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.07721668828275381,
+      "baseline": 0.07847428227110642
+    },
+    {
+      "selected": 0.14606834984270645,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.3391602052736161,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    },
+    {
+      "selected": 0.0,
+      "baseline": 0.0
+    }
+  ],
+  "average_candidate_pool_size": 101.95,
+  "external_retrieval_limitation": "ListenBrainz Labs is precomputed and may include held-out-user activity; metrics isolate only MusicMyLove reranking."
+}

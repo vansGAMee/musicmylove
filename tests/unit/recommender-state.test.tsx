@@ -1,0 +1,463 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import { importPlaylist, recommendLocal, searchLocal } from "../../src/lib/offline/client";
+vi.mock("../../src/lib/offline/client", () => ({ importPlaylist: vi.fn(), recommendLocal: vi.fn(), searchLocal: vi.fn() }));
+// Reuse result fixtures at the worker-client boundary; these are not HTTP calls.
+function installFixtures(handler: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) {
+  vi.mocked(searchLocal).mockImplementation(async q => (await handler(`local:search?q=${encodeURIComponent(q)}`)).json());
+  vi.mocked(recommendLocal).mockImplementation(async (songs, feedback) => (await handler('local:tastelift', {body: JSON.stringify({songs, feedback})})).json());
+  vi.mocked(importPlaylist).mockImplementation(url => handler('local:playlist', {body: JSON.stringify({url})}));
+}
+import MusicRecommender from "../../src/components/MusicRecommender";
+
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); localStorage.clear(); });
+
+test("prefetches each selection and automatically returns results after the fifth", async () => {
+  vi.useFakeTimers();
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("local:search")) {
+      const title = new URL(url, "http://x").searchParams.get("q")!;
+      return new Response(JSON.stringify([{ mbid: `seed-${title}`, title, artist: `Artist ${title}` }]));
+    }
+    if (url.startsWith("local:tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: Array.from({ length: 40 }, (_, index) => ({
+          mbid: `candidate-${index}`,
+          title: `Candidate ${index}`,
+          artist: `Artist ${index}`,
+          score: 100 - index,
+          strongestTasteHead: index % 4,
+          seedSupport: 2,
+          popularityPercentile: 0.5,
+          noveltyLiftScore: 1.2,
+          spotifyLink: `https://open.spotify.com/search/Artist%20${index}%20Candidate%20${index}`,
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ id: null }));
+  });
+  installFixtures(fetcher);
+  render(<MusicRecommender />);
+  expect(screen.queryByRole("button", { name: /generate/i })).not.toBeInTheDocument();
+  for (const title of ["one", "two", "three", "four", "five"]) {
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: title } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+    expect(screen.getByRole("button", { name: new RegExp(title, "i") })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(title, "i") }));
+  }
+  await act(async () => { await Promise.resolve(); });
+  expect(screen.getAllByTestId("recommendation")).toHaveLength(40);
+  expect(screen.getByText("5 / 5")).toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"))).toHaveLength(1);
+});
+
+test("handles uploading 417 Russian tracks, passes all 417 seeds to tastelift, and never renders an iframe", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith("local:tastelift")) {
+      const body = JSON.parse(String(init?.body));
+      expect(body.songs.length).toBe(417);
+      return new Response(JSON.stringify({
+        recommendations: Array.from({ length: 40 }, (_, index) => ({
+          mbid: `candidate-${index}`,
+          title: `Рекомендация ${index}`,
+          artist: `Артист ${index}`,
+          score: 100 - index,
+          strongestTasteHead: 0,
+          seedSupport: 2,
+          popularityPercentile: 0.5,
+          noveltyLiftScore: 1.2,
+          spotifyLink: `https://open.spotify.com/search/Candidate%20${index}`,
+        })),
+        seeds: body.songs.map((s: { artist: string; title: string }, i: number) => ({
+          input: s,
+          status: "resolved",
+          source: "text",
+          track: { mbid: `seed-${i}`, artist: s.artist, title: s.title },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  const { container } = render(<MusicRecommender />);
+
+  // Verify no iframe anywhere
+  expect(container.querySelector("iframe")).toBeNull();
+
+  // Create a 417-song text content
+  const russianTracks = [
+    "Михаил Круг — Фраер",
+    "ВИА Гра — Притяжения больше нет",
+    "Валерий Меладзе — Иностранец",
+    "Самоцветы — На дальней станции сойду",
+    ...Array.from({ length: 413 }, (_, i) => `Русский Исполнитель ${i} — Трек ${i}`),
+  ].join("\n");
+
+  const file = new File([russianTracks], "playlist.txt", { type: "text/plain" });
+  file.text = async () => russianTracks;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+  expect(input).not.toBeNull();
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  // Verify tastelift was called with all 417 seeds
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
+  expect(tasteliftCalls).toHaveLength(1);
+  const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
+  expect(sentPayload.songs).toHaveLength(417);
+  expect(sentPayload.songs[0].artist).toBe("Михаил Круг");
+  expect(sentPayload.songs[0].title).toBe("Фраер");
+
+  // Verify 40 distinct recommendations rendered
+  const recs = screen.getAllByTestId("recommendation");
+  expect(recs.length).toBeGreaterThanOrEqual(40);
+  expect(screen.getAllByText("Рекомендация 0").length).toBeGreaterThanOrEqual(1);
+  expect(screen.getAllByText("Рекомендация 39").length).toBeGreaterThanOrEqual(1);
+
+  // Verify no error message
+  expect(screen.queryByText(/pipeline is temporarily unavailable/i)).toBeNull();
+
+  // Verify no iframe is ever created
+  expect(container.querySelector("iframe")).toBeNull();
+});
+
+test("handles Yandex playlist import successfully without ever rendering an iframe", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith("local:playlist")) {
+      return new Response(JSON.stringify({
+        ok: true,
+        tracks: Array.from({ length: 50 }, (_, i) => ({
+          id: `ym-${i}`,
+          title: `Яндекс Трек ${i}`,
+          artists: [`Яндекс Артист ${i}`],
+        })),
+      }));
+    }
+    if (url.startsWith("local:tastelift")) {
+      const body = JSON.parse(String(init?.body));
+      expect(body.songs.length).toBe(50);
+      return new Response(JSON.stringify({
+        recommendations: Array.from({ length: 40 }, (_, index) => ({
+          mbid: `candidate-${index}`,
+          title: `YM Рекомендация ${index}`,
+          artist: `YM Артист ${index}`,
+          score: 100 - index,
+          strongestTasteHead: 0,
+          seedSupport: 2,
+          popularityPercentile: 0.5,
+          noveltyLiftScore: 1.2,
+          spotifyLink: `https://open.spotify.com/search/YM%20${index}`,
+        })),
+        seeds: body.songs.map((s: { artist: string; title: string }, i: number) => ({
+          input: s,
+          status: "resolved",
+          source: "text",
+          track: { mbid: `ym-seed-${i}`, artist: s.artist, title: s.title },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  const { container } = render(<MusicRecommender />);
+
+  // Fill in Yandex URL input
+  const input = container.querySelector(".yandex-input") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "https://music.yandex.ru/playlists/59b1329f-1186-c562-f8c5-4f8e397656a8" } });
+
+  // Submit Yandex import form
+  const submitBtn = container.querySelector(".yandex-submit-btn") as HTMLButtonElement;
+  await act(async () => {
+    fireEvent.click(submitBtn);
+  });
+
+  // Verify tastelift received all 50 seeds
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
+  expect(tasteliftCalls).toHaveLength(1);
+  const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
+  expect(sentPayload.songs).toHaveLength(50);
+
+  // Verify recommendations loaded
+  expect(screen.getAllByText("YM Рекомендация 0").length).toBeGreaterThanOrEqual(1);
+
+  // Verify no iframe anywhere
+  expect(container.querySelector("iframe")).toBeNull();
+});
+
+test("handles Yandex geo-block error gracefully without ever rendering an iframe", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("local:playlist")) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          code: "geo_blocked",
+          error: "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную.",
+        }),
+        { status: 451 }
+      );
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  const { container } = render(<MusicRecommender />);
+
+  const input = container.querySelector(".yandex-input") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "https://music.yandex.ru/playlists/59b1329f-1186-c562-f8c5-4f8e397656a8" } });
+
+  const submitBtn = container.querySelector(".yandex-submit-btn") as HTMLButtonElement;
+  await act(async () => {
+    fireEvent.click(submitBtn);
+  });
+
+  // Verify notice is shown
+  expect(container.querySelector(".yandex-notice")).toHaveTextContent(/не удалось импортировать плейлист|could not import playlist/i);
+
+  // Absolutely NO iframe is rendered
+  expect(container.querySelector("iframe")).toBeNull();
+  expect(container.querySelector(".yandex-iframe-wrapper")).toBeNull();
+});
+
+test("displays liked tracks in favorites tab and keeps them in the recommendation list", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("local:tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: [
+          { mbid: "rec-1", title: "Loved Song", artist: "Loved Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+          { mbid: "rec-2", title: "Other Song", artist: "Other Artist", score: 95, strongestTasteHead: 1, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.2, spotifyLink: "" },
+        ],
+        seeds: Array.from({ length: 5 }, (_, i) => ({
+          input: { artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  const { container } = render(<MusicRecommender />);
+  const playlistInput = [
+    "Artist,Title",
+    "Seed Artist 0,Seed Title 0",
+    "Seed Artist 1,Seed Title 1",
+    "Seed Artist 2,Seed Title 2",
+    "Seed Artist 3,Seed Title 3",
+    "Seed Artist 4,Seed Title 4",
+  ].join("\n");
+
+  const file = new File([playlistInput], "seeds.csv", { type: "text/csv" });
+  file.text = async () => playlistInput;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  // Recommendations are displayed
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+
+  // Find the like button for Loved Song and click it
+  const likeBtn = screen.getByRole("button", { name: /^like track: loved song$/i });
+  await act(async () => {
+    fireEvent.click(likeBtn);
+  });
+
+  // The track is still in the playlist (not removed!)
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+
+  // Switch to Favorites tab
+  const favoritesTabBtn = screen.getAllByRole("button", { name: /Favorites|Избранное/i })[0];
+  await act(async () => {
+    fireEvent.click(favoritesTabBtn);
+  });
+
+  // Favorites tab displays Loved Song!
+  expect(screen.getAllByText("Loved Song").length).toBeGreaterThanOrEqual(1);
+  // But does NOT display Other Song (which was not liked)
+  expect(screen.queryByText("Other Song")).toBeNull();
+});
+
+test("excludes tracks from the entire playlist even when playlist has more than 500 tracks", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith("local:tastelift")) {
+      return new Response(JSON.stringify({
+        recommendations: [
+          // This track is in the playlist at position 550 (outside the first 500)
+          { mbid: "rec-in-playlist", title: "Existing Song 550", artist: "Existing Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+          // This track is genuinely new
+          { mbid: "rec-brand-new", title: "Brand New Track", artist: "New Artist", score: 95, strongestTasteHead: 1, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.2, spotifyLink: "" },
+        ],
+        seeds: Array.from({ length: 500 }, (_, i) => ({
+          input: { artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: `Seed Artist ${i}`, title: `Seed Title ${i}` },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  const { container } = render(<MusicRecommender />);
+  // Create 600 tracks with CSV header
+  const tracks600 = [
+    "Artist,Title",
+    ...Array.from({ length: 600 }, (_, i) =>
+      i === 550 ? "Existing Artist,Existing Song 550" : `Playlist Artist ${i},Playlist Song ${i}`
+    ),
+  ].join("\n");
+
+  const file = new File([tracks600], "large_playlist.csv", { type: "text/csv" });
+  file.text = async () => tracks600;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  // Recommendations should contain Brand New Track, but NOT Existing Song 550
+  const recs = screen.getAllByTestId("recommendation");
+  const recTitles = recs.map((el) => el.querySelector(".track-title")?.textContent);
+  expect(recTitles).toContain("Brand New Track");
+  expect(recTitles).not.toContain("Existing Song 550");
+});
+
+test("persists liked tracks to localStorage favorite-tracks cache and loads them on mount into Favorites tab", async () => {
+  const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }));
+  installFixtures(fetcher);
+
+  // Prepopulate localStorage with a saved favorite track from a previous session
+  const savedFavorite = {
+    mbid: "fav-saved-1",
+    title: "Saved From Cache",
+    artist: "Cached Artist",
+    release: "Cached Album",
+    score: 98,
+    features: [],
+    pickedFrom: [],
+    liftScore: 1.45,
+    popularityPercentile: 0.6,
+  };
+  localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify([savedFavorite]));
+
+  render(<MusicRecommender />);
+
+  // Switch to Favorites tab
+  const favoritesTabBtn = screen.getAllByRole("button", { name: /Favorites|Избранное/i })[0];
+  await act(async () => {
+    fireEvent.click(favoritesTabBtn);
+  });
+
+  // Saved favorite track from cache is rendered immediately!
+  expect(screen.getByText("Saved From Cache")).toBeInTheDocument();
+  expect(screen.getByText("Cached Artist")).toBeInTheDocument();
+
+  // Like a demo track (e.g., Ceremony by New Order)
+  const allTabBtn = screen.getAllByRole("button", { name: /All|Все/i })[0];
+  await act(async () => {
+    fireEvent.click(allTabBtn);
+  });
+
+  const ceremonyLikeBtn = screen.getByRole("button", { name: /^like track: ceremony$/i });
+  await act(async () => {
+    fireEvent.click(ceremonyLikeBtn);
+  });
+
+  // Check localStorage favorite-tracks
+  const storedJson = localStorage.getItem("musicmylove:v1:favorite-tracks");
+  expect(storedJson).not.toBeNull();
+  const storedTracks = JSON.parse(storedJson!);
+  expect(storedTracks.some((t: { title: string }) => t.title === "Ceremony")).toBe(true);
+  expect(storedTracks.some((t: { title: string }) => t.title === "Saved From Cache")).toBe(true);
+
+  // Un-like Ceremony
+  await act(async () => {
+    fireEvent.click(ceremonyLikeBtn);
+  });
+
+  const storedAfterUnlike = JSON.parse(localStorage.getItem("musicmylove:v1:favorite-tracks")!);
+  expect(storedAfterUnlike.some((t: { title: string }) => t.title === "Ceremony")).toBe(false);
+  expect(storedAfterUnlike.some((t: { title: string }) => t.title === "Saved From Cache")).toBe(true);
+});
+
+test("sends cached favorites as signed feedback without mutating imported taste seeds", async () => {
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith("local:tastelift")) {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        recommendations: [
+          { mbid: "rec-new-1", title: "New Rec", artist: "New Artist", score: 99, strongestTasteHead: 0, seedSupport: 1, popularityPercentile: 0.5, noveltyLiftScore: 1.5, spotifyLink: "" },
+        ],
+        seeds: body.songs.map((s: { artist: string; title: string }, i: number) => ({
+          input: s,
+          status: "resolved",
+          track: { mbid: `seed-${i}`, artist: s.artist, title: s.title },
+        })),
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  });
+  installFixtures(fetcher);
+
+  // Prepopulate localStorage with cached favorite track
+  localStorage.setItem("musicmylove:v1:favorite-tracks", JSON.stringify([
+    {
+      mbid: "fav-prior-1",
+      title: "Previous Love",
+      artist: "Loved Creator",
+      score: 100,
+      features: [],
+      pickedFrom: [],
+    },
+  ]));
+
+  const { container } = render(<MusicRecommender />);
+  const playlistInput = [
+    "Artist,Title",
+    "Base Artist 1,Base Title 1",
+    "Base Artist 2,Base Title 2",
+    "Base Artist 3,Base Title 3",
+    "Base Artist 4,Base Title 4",
+    "Base Artist 5,Base Title 5",
+  ].join("\n");
+
+  const file = new File([playlistInput], "seeds.csv", { type: "text/csv" });
+  file.text = async () => playlistInput;
+  const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+
+  await act(async () => {
+    fireEvent.change(input, { target: { files: [file] } });
+  });
+  await act(async () => { await Promise.resolve(); });
+
+  const tasteliftCalls = fetcher.mock.calls.filter(([url]) => String(url).startsWith("local:tastelift"));
+  expect(tasteliftCalls.length).toBeGreaterThanOrEqual(1);
+  const sentPayload = JSON.parse(String(tasteliftCalls[0]?.[1]?.body));
+  const sentSongTitles = sentPayload.songs.map((s: { title: string }) => s.title);
+
+  expect(sentSongTitles).not.toContain("Previous Love");
+  expect(sentPayload.feedback).toEqual({ "fav-prior-1": "like" });
+});
+
+
+
