@@ -90,7 +90,7 @@ def focus_from_result(result, selection):
 
 
 def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedback.DEFAULT,
-             checkpoint=None, personal=True, focus=None):
+             checkpoint=None, personal=True, focus=None, sound_cache=None):
     library_profile = resolve_profile(lines, engine.tracks, strict=strict)
     inputs = sorted(set(focus)) if focus is not None else lines
     profile = resolve_profile(inputs, engine.tracks, strict=True) if focus is not None else library_profile
@@ -106,10 +106,14 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
     library_ids = {engine.tracks[i]['id'] for i in library_profile['seeds']}
     excluded = sorted(set(lines) | library_ids | set(inputs) | set(seed_lines) | set(known)
                       | set(feedback.exclusions(feedback_dir, discovery=mode == '2')))
+    sound_report = None
     discovery_pool = None
     if mode == '2' and hasattr(engine, 'graph'):
         from .discovery_policy import prepare_discovery
         discovery_pool = prepare_discovery(engine, seeds, excluded)
+        if sound_cache is not None:
+            from .sound import filter_pool
+            sound_report = filter_pool(discovery_pool, seeds, sound_cache)
         candidates = discovery_pool.candidates
     scores = engine.score(model, features)
     personal_features = np.column_stack((features, engine.embeddings.detach().cpu().numpy()))
@@ -138,12 +142,15 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
     return {'status': getattr(engine, 'refinement_status', 'EXPERIMENTAL'), 'mode': title, 'input': inputs,
             'library_input': lines, 'focus': [dict(id=engine.tracks[i]['id'], artist=engine.tracks[i]['artist'],
                                                  title=engine.tracks[i]['title']) for i in seeds] if focus is not None else [],
-            'known_exclusions': excluded, 'selection_policy': policy,
+            'known_exclusions': excluded, 'selection_policy': policy, 'sound_report': sound_report,
             'checkpoint_sha256': checkpoint, 'exposure_id': uuid.uuid4().hex, 'personal_status': personal_status,
             'resolved': len(seeds), 'matching': profile['matches'], 'strict_matching': strict, 'unresolved': unresolved, 'candidates': len(candidates), 'top50': rows}
 
 
 def show(result, folder):
+    if result.get('sound_report'):
+        r=result['sound_report']
+        print(f"Звук CLAP: исходных треков {r['seeds_with_audio']}/{r['seed_count']}; сравнений {r['compared_edges']}, отсеяно связей {r['rejected_edges']}. Без звука — прежний отбор.")
     if result.get('focus'):
         print('Направление: ' + '; '.join(t['artist'] + ' — ' + t['title'] for t in result['focus']))
     if result.get('personal_status'):
@@ -159,7 +166,9 @@ def show(result, folder):
     for row in result['top50']:
         mark = '+' if row['artist_not_in_library'] else ' '
         direction = ' ← ' + row['discovery_evidence']['seed_artist'] if row.get('discovery_evidence') else ''
-        print(f"{row['rank']:2}. {mark} {row['artist']} — {row['title']}{direction}")
+        ev = row.get('discovery_evidence', {})
+        sound = f" [звук {ev['audio_similarity']:.2f}]" if ev.get('audio_compared') else ''
+        print(f"{row['rank']:2}. {mark} {row['artist']} — {row['title']}{direction}{sound}")
     policy = result.get('selection_policy', {})
     if policy:
         print('Стрелка — связь с исходным треком по слушателям и обученным векторам, не анализ звука.')
@@ -183,6 +192,9 @@ def main():
     parser.add_argument('--once', action='store_true', help='Создать плейлист и выйти')
     parser.add_argument('--feedback', type=Path, default=feedback.DEFAULT, help='Папка личных оценок и модели')
     parser.add_argument('--no-personal', action='store_true', help='Сравнить выдачу без личной поправки')
+    from .sound import DEFAULT_CACHE, SoundCache
+    parser.add_argument('--sound-cache', type=Path, default=DEFAULT_CACHE)
+    parser.add_argument('--no-sound', action='store_true', help='Сравнить с прежней выдачей без аудио')
     args = parser.parse_args()
     if args.once and not args.library:
         parser.error('--once требует путь к библиотеке')
@@ -204,7 +216,8 @@ def main():
         def make_playlist(selected_focus=None):
             return generate(engine, model, validate_lines(lines), sorted(set(known) | explored), mode,
                             strict=args.strict_matching, feedback_dir=args.feedback,
-                            checkpoint=checkpoint, personal=not args.no_personal, focus=selected_focus)
+                            checkpoint=checkpoint, personal=not args.no_personal, focus=selected_focus,
+                            sound_cache=None if args.no_sound else SoundCache(args.sound_cache))
         print('Готово. Это экспериментальная модель; проверяй на своём вкусе.')
         if lines:
             last = make_playlist()

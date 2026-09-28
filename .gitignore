@@ -16,3 +16,5 @@ out/
 public/data/
 .vercel/
 *.tsbuildinfo
+
+.venv-sound/
