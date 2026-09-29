@@ -27,10 +27,14 @@ def atomic_torch(path,value):
     temp=path.with_suffix('.tmp');torch.save(value,temp);temp.replace(path)
 
 
-def prepare(source,cache,run):
+def prepare(source,cache,run,*,population=False):
     from .cli import open_engine
     from .ranker_data import load_ranker_data
-    engine,_=open_engine(source,None,inference_only=True)
+    if population:
+        from .population import source_engine
+        engine=source_engine(source)
+    else:
+        engine,_=open_engine(source,None,inference_only=True)
     engine.data=load_ranker_data(source/'data/dataset.json',engine.meta)
     n=len(engine.tracks);x=np.zeros((n,610),np.float32)
     x[:,:96]=engine.embeddings.numpy()
@@ -50,14 +54,24 @@ def prepare(source,cache,run):
         own=[j for j in ids if engine.artist_ids[j]==engine.artist_ids[i]][:8]
         chosen=novel+own;neighbors[i,:len(chosen)]=chosen
     protected=raw_protection(engine.data,engine.meta);rng=np.random.default_rng(42)
-    train=[];dev=[];stats=dict(audio_tracks=audio_count,tracks=n,train_users=0,dev_users=0,skipped_train_episodes=0)
+    train=[];dev=[];audit=[];stats=dict(audio_tracks=audio_count,tracks=n,train_users=0,dev_users=0,skipped_train_episodes=0)
     train_users=mapped_users(engine.data,engine.meta,'ranker_train')
     dev_users=mapped_users(engine.data,engine.meta,'dev')
+    audit_users=[]
+    if population:
+        from .population import split_ranker_users
+        train_users,audit_users=split_ranker_users(train_users)
+        if len(audit_users)<100:raise ValueError('Need at least 100 reserved audit users')
     if set(u for u,_ in train_users)&(set(engine.user_index)|set(u for u,_ in dev_users)):
         raise ValueError('User split overlap')
     if set(u for u,_ in dev_users)&set(engine.user_index):raise ValueError('DEV entered representation graph')
-    for split,users in [('train',train_users),('dev',dev_users)]:
+    if {u for u,_ in audit_users}&(set(engine.user_index)|{u for u,_ in train_users+dev_users}):
+        raise ValueError('Audit users entered graph, training or DEV')
+    for split,users in [('train',train_users),('dev',dev_users),('audit',audit_users)]:
         for number,(uid,known) in enumerate(users):
+            if population:
+                import hashlib
+                rng=np.random.default_rng(int(hashlib.sha256(('population-episodes-v1:'+uid).encode()).hexdigest()[:16],16))
             for discovery in (False,True):
                 seeds,targets=episode(known,engine.tracks,engine.families,rng,discovery)
                 if not seeds or not targets:continue
@@ -67,7 +81,10 @@ def prepare(source,cache,run):
                     p,neg=pairs(targets,known|protected.get(uid,set()),candidates,engine.families,rng)
                     if not p:stats['skipped_train_episodes']+=1
                     for a,b in zip(p,neg):train.append((chosen,a,b))
-                else:dev.append(dict(user=uid,seeds=chosen,candidates=candidates,targets=sorted(targets),discovery=discovery))
+                else:
+                    query=dict(user=uid,seeds=chosen,candidates=candidates,targets=sorted(targets),discovery=discovery)
+                    if population:query['full_seeds']=seeds
+                    (audit if split=='audit' else dev).append(query)
             if (number+1)%500==0:print(f'Prepare {split}: {number+1}/{len(users)} users',flush=True)
         stats[split+'_users']=len(users)
     if not train or len(dev)<20:raise ValueError('Insufficient independent training/DEV examples')
@@ -76,6 +93,9 @@ def prepare(source,cache,run):
     for i,(s,p,q) in enumerate(train):seeds[i,:len(s)]=s;mask[i,:len(s)]=True;pos.append(p);neg.append(q)
     pack=dict(x=x,neighbors=neighbors,artists=engine.artist_ids.astype(np.int32),families=engine.families,
               tracks=engine.tracks,seeds=seeds,mask=mask,pos=np.asarray(pos),neg=np.asarray(neg),dev=dev,stats=stats)
+    if population:
+        if len({q['user'] for q in audit})<100:raise ValueError('Fewer than 100 eligible audit users')
+        pack['audit']=audit
     atomic_torch(run/'prepared.pt',pack)
     return pack
 
