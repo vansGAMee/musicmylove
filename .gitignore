@@ -18,3 +18,4 @@ public/data/
 *.tsbuildinfo
 
 .venv-sound/
+public/joint-model/

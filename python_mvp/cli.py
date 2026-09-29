@@ -101,6 +101,8 @@ def generate(engine, model, lines, known, mode, strict=False, feedback_dir=feedb
         raise ValueError('Ни один трек не распознан однозначно. Попробуй другой список или точные Artist - Title.')
     features, candidates, _ = engine.features(seeds)
     title, cap, share = MODES[mode]
+    if not hasattr(engine, 'graph') and hasattr(engine, 'manifest'):
+        title = 'Граф + звук: единое нейронное ранжирование (эксперимент)'
     seed_lines = [engine.tracks[i]['artist'] + ' - ' + engine.tracks[i]['title']
                   for i in sorted(set(seeds) | set(library_profile['seeds']))]
     library_ids = {engine.tracks[i]['id'] for i in library_profile['seeds']}
@@ -233,7 +235,8 @@ def main():
         if args.once:
             return 0
         while True:
-            print(f'Профиль: {len(lines)} треков · уже знакомое: {len(known)} · {MODES[mode][0]}')
+            mode_title = 'Граф + звук: единое ранжирование' if args.joint else MODES[mode][0]
+            print(f'Профиль: {len(lines)} треков · уже знакомое: {len(known)} · {mode_title}')
             if focus is not None:
                 print(f'Поиск по выбранным трекам: {len(focus)}. Вернуться: весь профиль')
             print('1 Файл  2 Вставить треки  3 Получить плейлист  4 Режим\n'

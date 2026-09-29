@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "build": "npm run build:catalog && next build --webpack",
+    "build:joint": "tsx scripts/joint-build.ts",
     "start": "tsx scripts/offline/serve.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

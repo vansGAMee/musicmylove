@@ -58,6 +58,12 @@ def test_browser_export_python_typescript_parity(tmp_path):
     from python_mvp.cli import generate
     result=generate(engine,None,['A0 - T0','A1 - T1'],[],'2',personal=False,feedback_dir=tmp_path/'feedback')
     assert result['top50'] and result['sound_report'] is None
+    assert 'Открытия' not in result['mode']
+    songs=[dict(artist='A0',title='T0'),dict(artist='A1',title='T1')]
+    input_path.write_text(json.dumps(songs))
+    site=json.loads(subprocess.check_output(['node_modules/.bin/tsx','scripts/joint-site-parity.ts',str(tmp_path),str(input_path)],text=True))
+    assert site['profile']['seeds']==[0,1]
+    assert [r['mbid'] for r in site['result']['recommendations']]==[r['id'] for r in result['top50']]
 
 
 def test_joint_small_optimization_and_checkpoint_reuse(tmp_path):

@@ -94,12 +94,16 @@ worker.postMessage({id:2,type:'recommend',seeds:[12,98],known:[]});
 ```
 
 Copy only `browser/` contents to an independently published static asset folder.
-The main website UI and Vercel deployment have NOT been switched in this change.
-This provides a browser engine and export contract for that integration. Existing
-website build uses a different recommender; do not confuse it with this model.
+The website now has an explicit joint-model build: `npm run build:joint`.
+It verifies and copies this export, enables joint inference in the existing UI,
+and prepares `.vercel/output` for `npx vercel deploy --prebuilt` (preview).
+The normal `npm run build` still uses the older recommender. See
+`docs/audits/2026-09-29-joint-release.md` for the measured quality limitations;
+integration is not proof of an improved discovery model.
 
 Tests verify gradients reaching audio inputs, protected negatives, deterministic
 retrieval, compact export, CLI integration, and Python↔TypeScript scores/order on
 synthetic fixtures. Small synthetic optimization tests check the training loop.
-Full dataset training, DEV results and phone benchmarks are left to user execution;
+The current trained run and its measured DEV/SHADOW results are documented in
+`docs/audits/2026-09-29-joint-release.md`. Phone benchmarks are still unmeasured;
 passing unit tests is not evidence of recommendation quality.

@@ -14,6 +14,7 @@ function rpc<T>(method:string,payload:unknown):Promise<T>{
   return new Promise((resolve,reject)=>{const id=++serial;pending.set(id,{resolve:resolve as (x:unknown)=>void,reject});worker!.postMessage({id,method,payload});});
 }
 export async function searchLocal(query: string): Promise<Track[]> {
+  if(process.env.NEXT_PUBLIC_JOINT_MODEL==='1')return (await import('../joint/client')).searchJoint(query);
   const local = await rpc<Track[]>('search', query);
   if (local.length > 0 || query.trim().length < 2) return local;
   try {
@@ -64,6 +65,7 @@ export async function importPlaylist(url:string): Promise<Response> {
 let context:Record<string,Context>|undefined;
 const attempted=new Set<string>();
 export async function recommendLocal(songs:Song[],feedback:Feedback){
+  if(process.env.NEXT_PUBLIC_JOINT_MODEL==='1')return (await import('../joint/client')).recommendJoint(songs,feedback);
   if(!context){try{context=JSON.parse(localStorage.getItem('musicmylove:context:v1')??'{}');}catch{context={};}}
   const holes=await rpc<Song[]>('missing',{songs,context});
   const fresh=holes.filter(s=>!attempted.has(key(s)));

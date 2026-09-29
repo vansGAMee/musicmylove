@@ -7,6 +7,7 @@ import { parseFileContentToSongs } from "../lib/tastelift/input";
 import { importPlaylist, recommendLocal, searchLocal } from "../lib/offline/client";
 import { recordingIdentity } from "../lib/tastelift/identity";
 
+const JOINT_MODEL = process.env.NEXT_PUBLIC_JOINT_MODEL === '1';
 const SUPPORTED_FORMATS = ["JSON", "CSV", "TXT", "M3U"] as const;
 
 interface TasteLiftApiRecommendation {
@@ -238,6 +239,7 @@ export default function MusicRecommender() {
   const [rankedPool, setRankedPool] = useState<RankedTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [modelCoverage, setModelCoverage] = useState("");
   const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>({});
   const [cachedFavorites, setCachedFavorites] = useState<RankedTrack[]>([]);
   const [spotifyLinks, setSpotifyLinks] = useState<Record<string, string>>({});
@@ -456,6 +458,7 @@ export default function MusicRecommender() {
       const currentFeedback = feedbackOverride ?? feedback;
       const localBody = payloadBody as { songs?: Array<{artist:string;title:string}> };
       const payload = await recommendLocal(localBody.songs ?? [], currentFeedback);
+      if (JOINT_MODEL) setModelCoverage(`Распознано ${payload.coverage.graph}/${payload.coverage.total}. Нераспознанные треки не формируют вкус. Лайки сохраняются; совместная модель на них пока не обучается.`);
       if (payload.seeds && payload.seeds.length > 0) {
         const resolvedSeeds: SeedTrack[] = payload.seeds.map((s, idx) => {
           const artist = s.track?.artist ?? s.input?.artist ?? "";
@@ -931,10 +934,10 @@ export default function MusicRecommender() {
         return true;
       });
 
-      return pool.slice(0, 40);
+      return pool.slice(0, JOINT_MODEL ? 50 : 40);
     }
 
-    return INITIAL_FIGMA_TRACKS;
+    return JOINT_MODEL ? [] : INITIAL_FIGMA_TRACKS;
   }, [rankedPool, feedback, activeTab, seeds, importedSeeds, allPlaylistTracks, cachedFavorites]);
 
   const activeTrack = selectedTrack;
@@ -1221,6 +1224,7 @@ export default function MusicRecommender() {
               id="json-file-input"
             />
 
+            {JOINT_MODEL && <p role="status">Экспериментальная граф + звук модель. Отдельный режим «Открытия» ещё не подтверждён проверкой качества. {modelCoverage}</p>}
             {error && (
               <div className="import-error-banner" role="alert">
                 <span>{error}</span>
