@@ -1468,7 +1468,6 @@ body {
 
   .cards-container {
     flex: 1;
-    min-height: 0;
     height: calc(100% - 44px);
     width: 100%;
     max-width: 440px;
@@ -1483,7 +1482,6 @@ body {
     min-width: 0;
     height: 100%;
     max-height: 100%;
-    min-height: 0;
     border-radius: 28px;
     padding: 18px 18px 14px;
     display: flex;
@@ -1508,13 +1506,20 @@ body {
   }
 
   .card-import .tactile-disc-dropzone {
+  flex-shrink: 0;
+  min-height: clamp(140px, 20vh, 200px);
+  min-width: clamp(140px, 20vh, 200px);
+  aspect-ratio: 1 / 1;
     width: clamp(140px, 20vh, 200px);
     height: clamp(140px, 20vh, 200px);
-    min-height: 0;
     margin: 10px auto 6px;
   }
 
   .card-import .tactile-disc-inner {
+  flex-shrink: 0;
+  min-height: clamp(64px, 9vh, 90px);
+  min-width: clamp(64px, 9vh, 90px);
+  aspect-ratio: 1 / 1;
     width: clamp(64px, 9vh, 90px);
     height: clamp(64px, 9vh, 90px);
     font-size: 13px;
@@ -1760,7 +1765,6 @@ body {
 
 .taste-card-preview-container {
   flex: 1;
-  min-height: 0;
   overflow-y: auto;
   padding: 16px 22px;
   background: var(--bg);

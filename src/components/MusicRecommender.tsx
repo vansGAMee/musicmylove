@@ -1224,7 +1224,6 @@ export default function MusicRecommender() {
               id="json-file-input"
             />
 
-            {JOINT_MODEL && <p role="status">Экспериментальная граф + звук модель. Отдельный режим «Открытия» ещё не подтверждён проверкой качества. {modelCoverage}</p>}
             {error && (
               <div className="import-error-banner" role="alert">
                 <span>{error}</span>
