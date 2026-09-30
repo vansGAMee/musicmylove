@@ -62,7 +62,9 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  overflow-x: hidden;
   margin: 0;
   background-color: var(--canvas-bg);
   color: var(--ink);
@@ -276,6 +278,7 @@ body {
 
 .card-scrollable {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 2px 2px 4px;
@@ -919,7 +922,14 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   transition: background-color 0.25s ease;
+}
+
+.seed-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .seed-chip button {
@@ -1506,20 +1516,22 @@ body {
   }
 
   .card-import .tactile-disc-dropzone {
-  flex-shrink: 0;
-  min-height: clamp(140px, 20vh, 200px);
-  min-width: clamp(140px, 20vh, 200px);
-  aspect-ratio: 1 / 1;
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    min-height: clamp(140px, 20vh, 200px);
+    min-width: clamp(140px, 20vh, 200px);
     width: clamp(140px, 20vh, 200px);
     height: clamp(140px, 20vh, 200px);
     margin: 10px auto 6px;
   }
 
   .card-import .tactile-disc-inner {
-  flex-shrink: 0;
-  min-height: clamp(64px, 9vh, 90px);
-  min-width: clamp(64px, 9vh, 90px);
-  aspect-ratio: 1 / 1;
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
+    flex-shrink: 0;
+    min-height: clamp(64px, 9vh, 90px);
+    min-width: clamp(64px, 9vh, 90px);
     width: clamp(64px, 9vh, 90px);
     height: clamp(64px, 9vh, 90px);
     font-size: 13px;

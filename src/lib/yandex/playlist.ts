@@ -42,6 +42,78 @@ export function clearYandexPlaylistCache(): void {
   PLAYLIST_CACHE.clear();
 }
 
+/**
+ * Fetches playlist metadata and tracks from public upstream converter (ymusicexport)
+ * which routes via CIS proxies and handles modern UUID playlists without geo-blocks.
+ */
+export async function fetchFromYMusicExport(
+  uuid: string,
+  fetcher: typeof fetch = fetch
+): Promise<YandexPlaylistResult | null> {
+  try {
+    const cleanUuid = uuid.replace(/^ps\./, "").trim();
+    if (!cleanUuid) return null;
+
+    const targets: string[] = [];
+    if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+      targets.push("/api/ymusicexport/export");
+    }
+    targets.push("https://ymusicexport.com/api/v1/export");
+
+    for (const target of targets) {
+      try {
+        const response = await fetcher(target, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ uuid: cleanUuid }),
+          signal: AbortSignal.timeout(12000),
+        });
+
+        if (!response.ok) continue;
+        const data = (await response.json()) as {
+          title?: string;
+          tracks?: Array<{ artist?: string; title?: string; durationMs?: number }>;
+        };
+
+        if (!data || !Array.isArray(data.tracks) || data.tracks.length === 0) continue;
+
+        const parsedTracks: YandexTrack[] = [];
+        for (const item of data.tracks) {
+          if (item && typeof item.title === "string" && typeof item.artist === "string") {
+            const title = item.title.trim();
+            const artist = item.artist.trim();
+            if (title && artist) {
+              parsedTracks.push({
+                id: `${artist} - ${title}`,
+                title,
+                artists: [artist],
+              });
+            }
+          }
+        }
+
+        if (parsedTracks.length === 0) continue;
+        const deduplicated = deduplicateTracks(parsedTracks);
+
+        return {
+          id: uuid,
+          title: data.title ?? "Плейлист Яндекс Музыки",
+          trackCount: deduplicated.length,
+          tracks: deduplicated,
+        };
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function cacheAndReturn(
   canonicalUrl: string,
   result: YandexPlaylistResult,
@@ -163,6 +235,22 @@ export function normalizeYandexPlaylistUrl(inputUrl: string): NormalizedYandexUr
 
 const DESKTOP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+function toProxyUrl(url: string): string {
+  if (typeof window === "undefined" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return url;
+  }
+  if (url.startsWith("https://music.yandex.ru/handlers/")) {
+    return url.replace("https://music.yandex.ru/handlers/", "/api/yandex-handlers/");
+  }
+  if (url.startsWith("https://api.music.yandex.net/")) {
+    return url.replace("https://api.music.yandex.net/", "/api/yandex-api/");
+  }
+  if (url.startsWith("https://music.yandex.ru/")) {
+    return url.replace("https://music.yandex.ru/", "/api/yandex-page/");
+  }
+  return url;
+}
+
 async function fetchWithBackoff(
   url: string,
   init: RequestInit,
@@ -170,6 +258,7 @@ async function fetchWithBackoff(
 ): Promise<Response> {
   const { timeoutMs, retries, fetcher, deadline } = options;
   let lastError: unknown;
+  const targetUrl = fetcher === fetch ? toProxyUrl(url) : url;
 
   for (let attempt = 0; attempt < retries; attempt++) {
     if (deadline && Date.now() >= deadline) {
@@ -182,11 +271,11 @@ async function fetchWithBackoff(
     const timer = setTimeout(() => controller.abort(), effectiveTimeout);
 
     try {
-      const response = await fetcher(url, {
+      const response = await fetcher(targetUrl, {
         ...init,
         signal: controller.signal,
         headers: {
-          "User-Agent": DESKTOP_USER_AGENT,
+          ...(typeof window === "undefined" ? { "User-Agent": DESKTOP_USER_AGENT } : {}),
           "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
           ...init.headers,
         },
@@ -200,7 +289,7 @@ async function fetchWithBackoff(
         throw new YandexPlaylistError("not_found", "Плейлист не найден. Проверьте правильность ссылки.");
       }
       if (response.status === 451) {
-        throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку).");
+        throw new YandexPlaylistError("geo_blocked", "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его.");
       }
       if (response.status === 401 || response.status === 403) {
         throw new YandexPlaylistError("private", "Плейлист приватный или доступ ограничен. Сделайте его публичным в настройках.");
@@ -621,6 +710,7 @@ export function extractFromHtmlState(html: string): {
   owner?: string;
   kind?: string;
   title?: string;
+  uuid?: string;
   tracks: YandexTrack[];
 } {
   // Detect actual 404 pages - match title/heading, avoid matching Next.js framework "notFound" strings in script chunks
@@ -630,13 +720,21 @@ export function extractFromHtmlState(html: string): {
 
   // Detect geo-block pages
   if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons")) {
-    throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку).");
+    throw new YandexPlaylistError("geo_blocked", "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его.");
   }
 
   let owner: string | undefined;
   let kind: string | undefined;
   let title: string | undefined;
+  let uuid: string | undefined;
   const tracks: YandexTrack[] = [];
+
+  // 0. Try extracting playlist UUID if present in page state
+  const uuidMatch = /"playlistUuid"\s*:\s*"([A-Za-z0-9._-]+)"/i.exec(html) ??
+    /"uuid"\s*:\s*"([0-9a-f-]{36})"/i.exec(html);
+  if (uuidMatch) {
+    uuid = uuidMatch[1];
+  }
 
   // 1. Try extracting owner and kind from Next.js params: {"userId":"...","kind":"..."}
   const paramsMatch = /"params"\s*:\s*\{[^}]*"userId"\s*:\s*"([^"]+)"[^}]*"kind"\s*:\s*"(\d+)"/i.exec(html) ??
@@ -716,7 +814,7 @@ export function extractFromHtmlState(html: string): {
     }
   }
 
-  return { owner, kind, title, tracks: deduplicateTracks(tracks) };
+  return { owner, kind, title, uuid, tracks: deduplicateTracks(tracks) };
 }
 
 /**
@@ -785,7 +883,7 @@ export async function fetchYandexPlaylist(
 
       const text = await response.text();
       if (text.includes("недоступна в вашем регионе") || text.includes("Unavailable For Legal Reasons") || text.includes("BlockPage")) {
-        throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+        throw new YandexPlaylistError("geo_blocked", "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его.");
       }
       if (text.startsWith("{")) {
         handlersSucceeded = true;
@@ -849,7 +947,7 @@ export async function fetchYandexPlaylist(
 
         const text = await response.text();
         if (text.includes("Unavailable For Legal Reasons") || text.includes("недоступна в вашем регионе") || text.includes("BlockPage")) {
-          throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+          throw new YandexPlaylistError("geo_blocked", "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его.");
         }
         if (text.startsWith("{")) {
           const data = JSON.parse(text) as {
@@ -906,21 +1004,41 @@ export async function fetchYandexPlaylist(
     ? `https://music.yandex.ru/playlists/${encodeURIComponent(currentUuid)}`
     : targetUrl;
 
-  const htmlResponse = await fetchWithBackoff(
-    pageUrl,
-    {
-      headers: {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  let html = "";
+  try {
+    const htmlResponse = await fetchWithBackoff(
+      pageUrl,
+      {
+        headers: {
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
       },
-    },
-    { timeoutMs, retries, fetcher, deadline }
-  );
+      { timeoutMs, retries, fetcher, deadline }
+    );
+    html = await htmlResponse.text();
+  } catch (err) {
+    if (currentUuid) {
+      const ymx = await fetchFromYMusicExport(currentUuid, fetcher);
+      if (ymx && ymx.tracks.length > 0) {
+        return cacheAndReturn(normalized.canonicalUrl, ymx, options.skipCache);
+      }
+    }
+    throw err;
+  }
 
-  const html = await htmlResponse.text();
   if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons") || html.includes("BlockPage")) {
-    throw new YandexPlaylistError("geo_blocked", "Сервис Яндекс Музыки недоступен из региона сервера (геоблокировка). Вставьте треки вручную (Исполнитель — Название, по одному на строку).");
+    if (currentUuid) {
+      const ymx = await fetchFromYMusicExport(currentUuid, fetcher);
+      if (ymx && ymx.tracks.length > 0) {
+        return cacheAndReturn(normalized.canonicalUrl, ymx, options.skipCache);
+      }
+    }
+    throw new YandexPlaylistError("geo_blocked", "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его.");
   }
   const extracted = extractFromHtmlState(html);
+  if (!currentUuid && extracted.uuid) {
+    currentUuid = extracted.uuid;
+  }
   if (options.requireComplete) {
     const counts = [...html.replace(/\\"/g, '"').matchAll(/"trackCount"\s*:\s*(\d+)/g)].map(m => Number(m[1]));
     if (counts.length !== 1 || counts[0] !== extracted.tracks.length) {
@@ -944,11 +1062,18 @@ export async function fetchYandexPlaylist(
   }
 
   if (extracted.tracks.length === 0) {
+    const targetUuid = currentUuid ?? extracted.uuid;
+    if (targetUuid) {
+      const ymx = await fetchFromYMusicExport(targetUuid, fetcher);
+      if (ymx && ymx.tracks.length > 0) {
+        return cacheAndReturn(normalized.canonicalUrl, ymx, options.skipCache);
+      }
+    }
     // Detect geo-block in page content
     if (html.includes("недоступна в вашем регионе") || html.includes("Unavailable For Legal Reasons")) {
       throw new YandexPlaylistError(
         "geo_blocked",
-        "Сервис Яндекс Музыки недоступен из текущего региона сервера. Попробуйте вставить треки вручную (Исполнитель — Название, по одному на строку)."
+        "Не удалось загрузить плейлист. Если включён VPN, попробуйте временно отключить его."
       );
     }
     // Detect actual 404 - match title/heading, avoid matching Next.js framework "notFound" strings in script chunks

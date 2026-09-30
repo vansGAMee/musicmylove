@@ -27,5 +27,30 @@ if(build.status!==0)process.exit(build.status??1);
 await fs.rm('.vercel/output',{recursive:true,force:true});
 await fs.mkdir('.vercel/output',{recursive:true});
 await fs.cp('out','.vercel/output/static',{recursive:true,filter:src=>path.relative('out',src).split(path.sep)[0]!=='data'});
-await fs.writeFile('.vercel/output/config.json',JSON.stringify({version:3,routes:[{handle:'filesystem'}]},null,2));
+await fs.writeFile('.vercel/output/config.json',JSON.stringify({
+  version: 3,
+  routes: [
+    {
+      src: "^/api/ymusicexport(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?$",
+      dest: "https://ymusicexport.com/api/v1/$1",
+      check: true
+    },
+    {
+      src: "^/api/yandex-handlers(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?$",
+      dest: "https://music.yandex.ru/handlers/$1",
+      check: true
+    },
+    {
+      src: "^/api/yandex-api(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?$",
+      dest: "https://api.music.yandex.net/$1",
+      check: true
+    },
+    {
+      src: "^/api/yandex-page(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?$",
+      dest: "https://music.yandex.ru/$1",
+      check: true
+    },
+    { handle: 'filesystem' }
+  ]
+},null,2));
 console.log('Ready for a PREVIEW: npx vercel deploy --prebuilt');

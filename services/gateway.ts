@@ -55,7 +55,7 @@ createServer(async(req,res)=>{
       const raw=input.url.startsWith('https://')?input.url:'https://'+input.url;
       if(!allowed(raw))throw new Error('Unsupported playlist host');
       const normalized=normalizeYandexPlaylistUrl(raw);
-      const playlist=await cached('playlist:'+normalized.canonicalUrl,3600000,()=>importYandexBatch(raw));
+      const playlist=await cached('playlist:'+normalized.canonicalUrl,3600000,()=>fetchYandexPlaylist(raw));
       send(200,{ok:true,playlist,tracks:playlist.tracks});return;
     }
     if(req.url==='/context'){

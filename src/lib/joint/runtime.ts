@@ -22,6 +22,20 @@ export function candidateIds(d:JointData,input:number[]):number[] {
   for(const s of selectSeeds(input,d.catalog.artists))for(let k=0;k<24;k++) {
     const i=d.neighbors[s*24+k];if(i>=0&&!blocked.has(d.catalog.families[i]))ids.add(i);
   }
+  if(!ids.size&&input.length){
+    const seeds=selectSeeds(input,d.catalog.artists),n=d.catalog.tracks.length,scores:{i:number;dot:number}[]=[];
+    for(let i=0;i<n;i++){
+      if(blocked.has(d.catalog.families[i]))continue;
+      let maxDot=-Infinity;
+      for(const s of seeds){
+        let dot=0;for(let j=0;j<32;j++)dot+=d.vectors[i*32+j]*d.vectors[s*32+j];
+        if(dot>maxDot)maxDot=dot;
+      }
+      scores.push({i,dot:maxDot});
+    }
+    scores.sort((a,b)=>b.dot-a.dot);
+    for(let k=0;k<Math.min(100,scores.length);k++)ids.add(scores[k].i);
+  }
   return [...ids].sort((a,b)=>a-b);
 }
 export function neuralScore(d:JointData,seeds:number[],i:number):number {

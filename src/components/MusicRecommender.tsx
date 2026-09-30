@@ -101,7 +101,7 @@ const TRANSLATIONS = {
     yandexPrivate: "Этот плейлист приватный. Сделайте его публичным в настройках.",
     yandexInvalidUrl: "Некорректная ссылка на плейлист Яндекс Музыки",
     yandexRateLimited: "Слишком много запросов. Подождите немного перед повторным импортом.",
-    yandexGeoBlocked: "Не удалось импортировать плейлист. Попробуйте ещё раз.",
+    yandexGeoBlocked: "Не удалось импортировать плейлист. Если включён VPN, попробуйте временно отключить его.",
     yandexImportedSuccess: "Импортировано треков: {count}",
     yandexEmpty: "В плейлисте не найдено треков",
     importedBadge: "Импортировано: {count}",
@@ -181,7 +181,7 @@ const TRANSLATIONS = {
     yandexPrivate: "This playlist is private. Please make it public in settings.",
     yandexInvalidUrl: "Invalid Yandex Music playlist link",
     yandexRateLimited: "Too many requests. Please wait a moment before trying again.",
-    yandexGeoBlocked: "Could not import playlist. Please try again.",
+    yandexGeoBlocked: "Could not import playlist. If VPN is on, try disabling it temporarily.",
     yandexImportedSuccess: "Imported tracks: {count}",
     yandexEmpty: "No tracks found in this playlist",
     importedBadge: "Imported: {count}",
@@ -239,7 +239,6 @@ export default function MusicRecommender() {
   const [rankedPool, setRankedPool] = useState<RankedTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [modelCoverage, setModelCoverage] = useState("");
   const [feedback, setFeedback] = useState<Record<string, "like" | "dislike">>({});
   const [cachedFavorites, setCachedFavorites] = useState<RankedTrack[]>([]);
   const [spotifyLinks, setSpotifyLinks] = useState<Record<string, string>>({});
@@ -458,7 +457,6 @@ export default function MusicRecommender() {
       const currentFeedback = feedbackOverride ?? feedback;
       const localBody = payloadBody as { songs?: Array<{artist:string;title:string}> };
       const payload = await recommendLocal(localBody.songs ?? [], currentFeedback);
-      if (JOINT_MODEL) setModelCoverage(`Распознано ${payload.coverage.graph}/${payload.coverage.total}. Нераспознанные треки не формируют вкус. Лайки сохраняются; совместная модель на них пока не обучается.`);
       if (payload.seeds && payload.seeds.length > 0) {
         const resolvedSeeds: SeedTrack[] = payload.seeds.map((s, idx) => {
           const artist = s.track?.artist ?? s.input?.artist ?? "";
@@ -937,7 +935,7 @@ export default function MusicRecommender() {
       return pool.slice(0, JOINT_MODEL ? 50 : 40);
     }
 
-    return JOINT_MODEL ? [] : INITIAL_FIGMA_TRACKS;
+    return INITIAL_FIGMA_TRACKS;
   }, [rankedPool, feedback, activeTab, seeds, importedSeeds, allPlaylistTracks, cachedFavorites]);
 
   const activeTrack = selectedTrack;

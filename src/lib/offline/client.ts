@@ -1,7 +1,7 @@
 import { key, type Context, type Feedback, type Song } from './engine';
 import type { recommend } from './engine';
 import type { Track } from '../types';
-const gateway=process.env.NEXT_PUBLIC_GATEWAY_URL?.replace(/\/$/,'');
+const gateway=process.env.NEXT_PUBLIC_GATEWAY_URL?.replace(/\/$/,'') || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://localhost:8787' : undefined);
 function gatewayUrl(path:string){
   const url=new URL(gateway!);
   if(url.hostname==='functions.yandexcloud.net'){url.searchParams.set('route',path);return url.href;}
@@ -54,7 +54,7 @@ export async function importPlaylist(url:string): Promise<Response> {
     const isNotFound = (err as { code?: string })?.code === 'not_found';
     const status = isGeo ? 451 : isPrivate ? 403 : isNotFound ? 404 : 400;
     const msg = isGeo
-      ? 'Не удалось импортировать плейлист. Попробуйте ещё раз.'
+      ? 'Не удалось импортировать плейлист. Если включён VPN, попробуйте временно отключить его.'
       : err instanceof Error ? err.message : 'Ошибка импорта плейлиста';
     return new Response(JSON.stringify({ ok: false, error: msg, code: (err as { code?: string })?.code ?? 'geo_blocked' }), {
       status,
@@ -65,7 +65,13 @@ export async function importPlaylist(url:string): Promise<Response> {
 let context:Record<string,Context>|undefined;
 const attempted=new Set<string>();
 export async function recommendLocal(songs:Song[],feedback:Feedback){
-  if(process.env.NEXT_PUBLIC_JOINT_MODEL==='1')return (await import('../joint/client')).recommendJoint(songs,feedback);
+  if(process.env.NEXT_PUBLIC_JOINT_MODEL==='1'){
+    try {
+      return await (await import('../joint/client')).recommendJoint(songs,feedback);
+    } catch (err) {
+      console.warn('Joint model could not resolve seeds, falling back to standard engine:', err);
+    }
+  }
   if(!context){try{context=JSON.parse(localStorage.getItem('musicmylove:context:v1')??'{}');}catch{context={};}}
   const holes=await rpc<Song[]>('missing',{songs,context});
   const fresh=holes.filter(s=>!attempted.has(key(s)));
