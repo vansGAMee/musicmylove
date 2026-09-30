@@ -1,0 +1,34 @@
+{
+  "status": "PASS",
+  "seed": 44,
+  "tracks_total": 60,
+  "val_tracks_count": 15,
+  "candidate_pool_size": 60,
+  "test_a_same_track_retrieval": {
+    "accuracy_at_1": 0.4,
+    "accuracy_at_5": 0.8,
+    "mrr": 0.5576190476190476,
+    "passed": true
+  },
+  "test_b_random_control": {
+    "trained_mrr": 0.5576190476190476,
+    "random_mrr": 0.2994985668739792,
+    "trained_acc1": 0.4,
+    "random_acc1": 0.17777777777777778,
+    "beats_random": true
+  },
+  "test_c_shuffled_control": {
+    "trained_mrr": 0.5576190476190476,
+    "shuffled_mrr": 0.05218603311880921,
+    "beats_shuffled": true
+  },
+  "test_d_artist_disjoint": {
+    "artist_overlap": 0,
+    "passed": true
+  },
+  "test_f_representation_collapse": {
+    "embedding_std": 0.06152698025107384,
+    "covariance_matrix_rank": 14,
+    "no_collapse": true
+  }
+}

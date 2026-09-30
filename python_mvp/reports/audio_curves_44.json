@@ -1,0 +1,158 @@
+[
+  {
+    "epoch": 1,
+    "loss": 1.3439630071322124,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5,
+      "accuracy_at_5": 1.0,
+      "mrr": 0.6513888888888889,
+      "embedding_std": 0.059598151594400406,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 2,
+    "loss": 1.0322052637736003,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.75,
+      "accuracy_at_5": 1.0,
+      "mrr": 0.8361111111111111,
+      "embedding_std": 0.05693260207772255,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 3,
+    "loss": 1.1551023920377095,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5833333333333334,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.7465277777777777,
+      "embedding_std": 0.05901679769158363,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 4,
+    "loss": 0.9942029019196829,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5833333333333334,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.7430555555555555,
+      "embedding_std": 0.05229300633072853,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 5,
+    "loss": 0.6526715755462646,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.4166666666666667,
+      "accuracy_at_5": 0.8333333333333334,
+      "mrr": 0.6349206349206349,
+      "embedding_std": 0.058509644120931625,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 6,
+    "loss": 0.8529386222362518,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.6952380952380951,
+      "embedding_std": 0.06552264094352722,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 7,
+    "loss": 0.855831374724706,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.4166666666666667,
+      "accuracy_at_5": 0.8333333333333334,
+      "mrr": 0.6180555555555555,
+      "embedding_std": 0.06453970819711685,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 8,
+    "loss": 0.887474258740743,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.6716269841269842,
+      "embedding_std": 0.06483065336942673,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 9,
+    "loss": 0.8347947100798289,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.6666666666666666,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.7688492063492064,
+      "embedding_std": 0.06309261918067932,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 10,
+    "loss": 0.6331653048594793,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.6666666666666666,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.7785714285714286,
+      "embedding_std": 0.06852369010448456,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 11,
+    "loss": 0.7032579481601715,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.5,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.685515873015873,
+      "embedding_std": 0.07462631911039352,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  },
+  {
+    "epoch": 12,
+    "loss": 0.46551698942979175,
+    "updates": 6,
+    "val_metrics": {
+      "accuracy_at_1": 0.75,
+      "accuracy_at_5": 0.9166666666666666,
+      "mrr": 0.8244047619047619,
+      "embedding_std": 0.07575608044862747,
+      "covariance_matrix_rank": 11,
+      "tracks_evaluated": 12
+    }
+  }
+]

@@ -1,0 +1,49 @@
+{
+  "status": "CODE_CHECKED_DATA_BLOCKED",
+  "checks": [
+    {
+      "command": "npm test",
+      "exit_code": 0,
+      "log": "check_1.log"
+    },
+    {
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "log": "check_2.log"
+    },
+    {
+      "command": "python -m pytest",
+      "exit_code": 0,
+      "log": "check_3.log"
+    },
+    {
+      "command": "python scripts/check_parity.py",
+      "exit_code": 0,
+      "log": "check_4.log"
+    },
+    {
+      "command": "npm run smoke:live",
+      "exit_code": 0,
+      "log": "check_5.log"
+    },
+    {
+      "command": "npm run build",
+      "exit_code": 0,
+      "log": "check_6.log"
+    },
+    {
+      "command": "python -m pytest python_mvp/tests -q",
+      "exit_code": 0,
+      "log": "check_7.log"
+    }
+  ],
+  "cli_without_release": {
+    "command": "python python_mvp/recommend.py python_mvp/example_tracks.txt",
+    "exit_code": 2,
+    "stderr": "BLOCKED: no release evidence; collect data and train/evaluate first. --experimental accepts only dev-passed weights"
+  },
+  "real_training_executed": false,
+  "trained_recommendable_tracks": 0,
+  "quality_metrics": null,
+  "limitation": "Unit/component tests and old production checks do not validate this neural recommender end to end."
+}

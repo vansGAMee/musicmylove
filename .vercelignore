@@ -1,7 +1,6 @@
 .worktrees
 .venv
 data
-scripts
 tests
 reports
 docs

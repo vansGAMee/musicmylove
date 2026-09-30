@@ -8,6 +8,11 @@ export interface TasteLiftTrack {
   popularityPercentile?: number;
 }
 
+export interface TasteLiftFeedback {
+  track: TasteLiftTrack;
+  value: "like" | "dislike";
+}
+
 interface TasteLiftArchitecture {
   dim: number;
   heads: number;
@@ -59,6 +64,8 @@ export interface TasteLiftCandidateScore {
   strongestHead: number;
   strongestHeadIndex: number;
   popularityPercentile: number;
+  /** Canonical seed indexes selected specifically for this candidate. */
+  contextSeedIndexes: number[];
 }
 
 export interface TasteLiftSetScore {
@@ -181,18 +188,44 @@ export class TasteLiftModel {
     const strongestHeadIndex = perHeadScores.findIndex((score) => score === strongestHead);
     const affinity = architecture.affinity_temperature * logSumExp(perHeadScores.map((score) => score / architecture.affinity_temperature));
     const popularityPrior = popularityWeight * popularityPercentile;
-    return { perHeadScores, affinity, popularityPrior, lift: affinity - popularityPrior, strongestHead, strongestHeadIndex, popularityPercentile };
+    return { perHeadScores, affinity, popularityPrior, lift: affinity - popularityPrior, strongestHead, strongestHeadIndex, popularityPercentile, contextSeedIndexes: [] };
   }
 
-  scoreCandidates(seeds: readonly TasteLiftTrack[], candidates: readonly TasteLiftTrack[]): TasteLiftSetScore {
-    const heads = this.encodeSet(seeds);
+  /** Candidate-aware relevance over the most related seeds; all seeds participate in context selection. */
+  scoreTargetCandidate(encodedSeeds: readonly (readonly number[])[], vector: readonly number[]): { relevance: number; contextSeedIndexes: number[] } {
+    if (encodedSeeds.length < 5 || encodedSeeds.length > 500 || vector.length !== this.artifact.architecture.dim) {
+      throw new Error("TasteLift target scoring requires 5 to 500 seeds and a compatible candidate");
+    }
+    const contextSize = Math.min(8, encodedSeeds.length);
+    const context = encodedSeeds
+      .map((seed, index) => ({ index, similarity: dot(seed, vector) }))
+      .sort((left, right) => right.similarity - left.similarity || left.index - right.index)
+      .slice(0, contextSize);
+    const attention = softmax(context.map((item) => item.similarity / 0.12));
+    const relevance = context.reduce((sum, item, index) => sum + item.similarity * attention[index]!, 0)
+      * softplus(this.artifact.weights.log_score_scale);
+    return { relevance, contextSeedIndexes: context.map((item) => item.index) };
+  }
+
+  scoreCandidates(seeds: readonly TasteLiftTrack[], candidates: readonly TasteLiftTrack[], feedback: readonly TasteLiftFeedback[] = []): TasteLiftSetScore {
+    const canonicalSeeds = [...seeds].sort(compareTracks);
+    const encodedSeeds = canonicalSeeds.map((seed) => this.encodeTrack(seed));
+    const heads = this.encodeSet(canonicalSeeds);
+    const feedbackVectors = [...feedback]
+      .sort((left, right) => compareTracks(left.track, right.track) || left.value.localeCompare(right.value))
+      .map((item) => ({ value: item.value, vector: this.encodeTrack(item.track) }));
     const { popularity } = this.artifact;
     return {
       heads,
       candidates: candidates.map((candidate) => {
         const vector = this.encodeTrack(candidate);
         const popularityPercentile = candidate.popularityPercentile ?? (candidate.mbid ? popularity[candidate.mbid] : undefined) ?? 0.5;
-        return this.scoreEncodedCandidate(heads, vector, popularityPercentile);
+        const headScore = this.scoreEncodedCandidate(heads, vector, popularityPercentile);
+        const target = this.scoreTargetCandidate(encodedSeeds, vector);
+        const positive = feedbackVectors.filter((item) => item.value === "like").map((item) => (dot(item.vector, vector) + 1) / 2);
+        const negative = feedbackVectors.filter((item) => item.value === "dislike").map((item) => (dot(item.vector, vector) + 1) / 2);
+        const feedbackAdjustment = 0.5 * ((positive.length ? Math.max(...positive) : 0) - (negative.length ? Math.max(...negative) : 0));
+        return { ...headScore, affinity: target.relevance, popularityPrior: 0, lift: target.relevance + feedbackAdjustment, contextSeedIndexes: target.contextSeedIndexes };
       }),
     };
   }

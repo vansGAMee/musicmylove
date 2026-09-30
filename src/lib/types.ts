@@ -43,6 +43,7 @@ export interface RankedTrack extends Track {
   popularityPercentile?: number;
   affinityScore?: number;
   liftScore?: number;
+  supportingSeeds?: { artist: string; title: string }[];
   /** Marginal slate score, added only by buildTasteSlate. */
   slateScore?: number;
   /** Human-readable ingredients of a TasteLift slate decision. */

@@ -8,7 +8,7 @@ import type {
 } from "./types";
 import { legacyResidualScore, type ModelArtifact } from "./mlp";
 import { buildTasteLiftRankingFields, tasteLiftContribution } from "./tastelift/features";
-import type { TasteLiftModel, TasteLiftTrack } from "./tastelift/model";
+import type { TasteLiftFeedback, TasteLiftModel, TasteLiftTrack } from "./tastelift/model";
 import type { TasteCandidatePool } from "./tastelift/retrieval";
 import type { UnresolvedTasteSeed } from "./tastelift/resolver";
 
@@ -110,6 +110,7 @@ function rankEvidenceCandidates(
   ranker: RankerName | ModelArtifact,
   tasteLift?: TasteLiftModel,
   tasteSeeds: readonly TasteLiftTrack[] = seeds,
+  feedback: readonly TasteLiftFeedback[] = [],
 ): RankedTrack[] {
   const seedByMbid = new Map(seeds.map((seed) => [seed.mbid, seed]));
   const ranked: RankedTrack[] = candidates
@@ -155,7 +156,7 @@ function rankEvidenceCandidates(
     }
   }
   if (tasteLift) {
-    const fields = buildTasteLiftRankingFields(tasteLift, tasteSeeds, candidates);
+    const fields = buildTasteLiftRankingFields(tasteLift, tasteSeeds, candidates, feedback);
     ranked.forEach((item) => {
       const taste = fields.get(item.mbid)!;
       item.residualScore = item.score;
@@ -229,9 +230,9 @@ function poolCandidates(pool: TasteCandidatePool): CandidateEvidence[] {
  * Scores Task 2's evidence-preserving retrieval pool directly. Text/OOV seeds
  * are encoded from input metadata; unresolved outcomes remain structured errors.
  */
-export function rankTasteCandidatePool(pool: TasteCandidatePool, ranker: RankerName | ModelArtifact, tasteLift: TasteLiftModel): RankedTrack[] {
+export function rankTasteCandidatePool(pool: TasteCandidatePool, ranker: RankerName | ModelArtifact, tasteLift: TasteLiftModel, feedback: readonly TasteLiftFeedback[] = []): RankedTrack[] {
   const { featureSeeds, tasteSeeds } = poolSeeds(pool);
-  return rankEvidenceCandidates(featureSeeds, poolCandidates(pool), ranker, tasteLift, tasteSeeds);
+  return rankEvidenceCandidates(featureSeeds, poolCandidates(pool), ranker, tasteLift, tasteSeeds, feedback);
 }
 
 export function diversify(

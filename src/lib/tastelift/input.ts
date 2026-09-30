@@ -494,7 +494,7 @@ export function parseTasteInput(value: unknown, options?: { allowPartial?: boole
     seen.add(key);
     seeds.push(seed);
   }
-  if (issues.length > 0) throw new TasteInputError(issues);
+  if (issues.length > 0 && !options?.allowPartial) throw new TasteInputError(issues);
   if (seeds.length < minRequired) {
     throw new TasteInputError([{ path: "songs", code: "duplicate", message: `at least ${minRequired} distinct songs are required after duplicate removal` }]);
   }

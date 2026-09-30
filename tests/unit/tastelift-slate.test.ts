@@ -23,11 +23,10 @@ const candidate = (index: number, overrides: Partial<RankedTrack> = {}): RankedT
 const candidates = (count = 60): RankedTrack[] => Array.from({ length: count }, (_, index) => candidate(index));
 
 describe("TasteLift discovery slate", () => {
-  test("returns exactly forty eligible tracks with a material long-tail share and all four heads", () => {
+  test("returns the forty most relevant eligible tracks without popularity or head quotas", () => {
     const slate = buildTasteSlate(candidates(), 40);
     expect(slate).toHaveLength(40);
-    expect(slate.filter((track) => (track.popularityPercentile ?? 0) < 0.85).length).toBeGreaterThanOrEqual(14);
-    expect(new Set(slate.map((track) => track.tasteHeadIndex))).toEqual(new Set([0, 1, 2, 3]));
+    expect(slate.map((track) => track.mbid)).toEqual(candidates().slice(0, 40).map((track) => track.mbid));
     expect(slate.every((track) => track.slateComponents?.relevance !== undefined && track.slateComponents.lift !== undefined && track.slateComponents.serendipity !== undefined)).toBe(true);
   });
 
@@ -51,13 +50,13 @@ describe("TasteLift discovery slate", () => {
     expect(slate.filter((track) => track.artist === "Same Artist")).toHaveLength(2);
   });
 
-  test("only admits mainstream tracks with exceptional relevance or personalized lift", () => {
+  test("keeps a more relevant mainstream track ahead of weaker long-tail tracks", () => {
     const slate = buildTasteSlate([
-      candidate(1, { mbid: "ordinary-mainstream", popularityPercentile: 0.95, score: 20, residualScore: 20, liftScore: 1 }),
+      candidate(1, { mbid: "ordinary-mainstream", popularityPercentile: 0.95, score: 70, residualScore: 70, liftScore: 12 }),
       candidate(2, { mbid: "exceptional-mainstream", popularityPercentile: 0.95, score: 100, residualScore: 100, liftScore: 20 }),
       ...Array.from({ length: 42 }, (_, index) => candidate(index + 10, { popularityPercentile: 0.2, score: 60 - index / 10, residualScore: 60 - index / 10, liftScore: 8 })),
     ], 40);
-    expect(slate.map((track) => track.mbid)).not.toContain("ordinary-mainstream");
+    expect(slate.map((track) => track.mbid)).toContain("ordinary-mainstream");
     expect(slate.map((track) => track.mbid)).toContain("exceptional-mainstream");
   });
 
@@ -98,26 +97,26 @@ describe("TasteLift discovery slate", () => {
     expect(slate.filter((track) => track.artist === "Artist A")).toHaveLength(2);
   });
 
-  test("reserves a feasible four-head assignment before greedy selection can strand a head", () => {
+  test("does not promote weak candidates merely to cover every learned head", () => {
     const heads = [
       candidate(1, { mbid: "h0-a", artist: "A", title: "H0 A", score: 100, residualScore: 100, liftScore: 100, popularityPercentile: 0.2, tasteHeadIndex: 0 }),
       candidate(2, { mbid: "h0-b", artist: "B", title: "H0 B", score: 60, residualScore: 60, liftScore: 60, popularityPercentile: 0.2, tasteHeadIndex: 0 }),
       candidate(3, { mbid: "h1-a", artist: "A", title: "H1 A", score: 99, residualScore: 99, liftScore: 99, popularityPercentile: 0.2, tasteHeadIndex: 1 }),
-      candidate(4, { mbid: "h1-c", artist: "C", title: "H1 C", score: 59, residualScore: 59, liftScore: 59, popularityPercentile: 0.2, tasteHeadIndex: 1 }),
+      candidate(4, { mbid: "h1-c", artist: "C", title: "H1 C", score: -100, residualScore: -100, liftScore: -100, popularityPercentile: 0.2, tasteHeadIndex: 1 }),
       candidate(5, { mbid: "h2-a", artist: "A", title: "H2 A", score: 80, residualScore: 80, liftScore: 80, popularityPercentile: 0.2, tasteHeadIndex: 2 }),
       candidate(6, { mbid: "h3-d", artist: "D", title: "H3 D", score: 70, residualScore: 70, liftScore: 70, popularityPercentile: 0.2, tasteHeadIndex: 3 }),
     ];
     const neutral = Array.from({ length: 36 }, (_, index) => candidate(index + 20, { mbid: `neutral-${index}`, artist: `Neutral ${index}`, title: `Neutral ${index}`, score: 10, residualScore: 10, liftScore: 10, popularityPercentile: 0.2, tasteHeadIndex: undefined }));
     const slate = buildTasteSlate([...heads, ...neutral], 40);
     expect(slate).toHaveLength(40);
-    expect(new Set(slate.map((track) => track.tasteHeadIndex).filter((head): head is number => head !== undefined))).toEqual(new Set([0, 1, 2, 3]));
+    expect(slate.map((track) => track.mbid)).not.toContain("h1-c");
   });
 
   test("does not treat equal or non-finite mainstream scores as exceptional", () => {
     const equalMainstream = Array.from({ length: 40 }, (_, index) => candidate(index, {
       mbid: `equal-${index}`, artist: `Equal ${index}`, popularityPercentile: 0.95, score: Number.NaN, residualScore: Number.NaN, liftScore: Number.NaN, tasteHeadIndex: undefined,
     }));
-    expect(buildTasteSlate(equalMainstream, 40)).toEqual([]);
+    expect(buildTasteSlate(equalMainstream, 40)).toHaveLength(40);
   });
 
   test("chooses the same complete duplicate record independent of input order", () => {

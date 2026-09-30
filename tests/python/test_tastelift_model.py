@@ -71,6 +71,23 @@ def test_serving_accepts_five_hundred_tracks_and_rejects_five_hundred_one():
         net.encode_set(torch.arange(501).unsqueeze(0), torch.ones((1, 501), dtype=torch.bool))
 
 
+def test_target_scoring_selects_bounded_candidate_specific_seed_context():
+    net = api().TasteLift.from_dataset(dataset(501), dim=24, buckets=128, seed=41).eval()
+    seeds = torch.arange(500).unsqueeze(0)
+    mask = torch.ones_like(seeds, dtype=torch.bool)
+    scored = net.score_candidates(seeds, mask, torch.tensor([[437]]))
+    assert scored["context_seed_indices"].shape == (1, 1, 8)
+    assert 437 in scored["context_seed_indices"][0, 0].tolist()
+
+
+def test_target_scoring_is_finite_for_mixed_seed_counts_in_one_batch():
+    net = model()
+    seeds = torch.stack([torch.arange(60), torch.arange(60)])
+    mask = torch.stack([torch.arange(60) < 5, torch.ones(60, dtype=torch.bool)])
+    scored = net.score_candidates(seeds, mask, torch.tensor([[70], [70]]))
+    assert torch.isfinite(scored["lift"]).all()
+
+
 def test_oov_metadata_uses_normalized_subword_path():
     net = model()
     a = net.encode_metadata([{"artist": "  Ｚｅｂｒａ   Ж ", "title": "Unknown 🐻"}])
@@ -217,5 +234,3 @@ def test_dynamic_hard_negatives_never_sample_user_history_and_train_top_4_hardes
     assert loss.ndim == 0
     loss.backward()
     assert net.track_projection.weight.grad is not None
-
-

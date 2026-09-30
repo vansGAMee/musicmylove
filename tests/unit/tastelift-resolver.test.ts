@@ -116,7 +116,7 @@ test("does not turn a mismatched Last.fm result into a false MBID identity", asy
   });
 });
 
-test("reports upstream failures per seed without losing neighboring seeds", async () => {
+test("uses text fallback for upstream failures without losing neighboring seeds", async () => {
   const unavailable: TasteResolverAdapters = {
     searchRecordings: async (query) => {
       if (query.includes("Missing Artist")) throw new Error("upstream unavailable");
@@ -128,8 +128,9 @@ test("reports upstream failures per seed without losing neighboring seeds", asyn
   expect(results[0]?.status).toBe("resolved");
   expect(results[1]).toEqual({
     input: inputs[1],
-    status: "unresolved",
-    error: { code: "upstream_error", message: "upstream unavailable" },
+    status: "resolved",
+    source: "text",
+    diagnostic: { status: "retrieval_unavailable", code: "upstream_error", message: "upstream unavailable" },
   });
 });
 
@@ -142,8 +143,9 @@ test("treats a Last.fm HTTP-200 error payload as a typed upstream failure", asyn
   });
   expect(result).toEqual({
     input: inputs[1],
-    status: "unresolved",
-    error: { code: "upstream_error", message: "Last.fm error 6: Track not found" },
+    status: "resolved",
+    source: "text",
+    diagnostic: { status: "retrieval_unavailable", code: "upstream_error", message: "Last.fm error 6: Track not found" },
   });
 });
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare old and new TasteLift models on the same frozen test split by Recall@10 and NDCG@10."""
+"""Train and compare TasteLift candidates on a user-disjoint local validation split."""
 from __future__ import annotations
 
 import argparse
@@ -13,62 +13,58 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ml.tastelift_data import POPULARITY_BANDS
 from ml.tastelift_model import TasteLift, train_model
 
 
-def build_evaluation_dataset(cat: dict, seed: int = 41) -> dict:
+def build_evaluation_dataset(cat: dict, seed: int = 41, masks_per_bucket: int = 4) -> dict:
     tracks = [{"id": t["mbid"], **t} for t in cat["tracks"]]
     histories = cat["histories"]
-    rng = random.Random(seed)
+    bands = {}
+    for index, track in enumerate(tracks):
+        band = min(9, max(0, int(track.get("popularityPercentile", 0.5) * 10)))
+        bands.setdefault(band, []).append(index)
 
-    # User-disjoint split:
-    # 0..499 -> train
-    # 500..549 -> validation
-    # 550..670 -> test
+    # Local artifact histories are re-split by user. The final 121 histories are
+    # deliberately never materialized as episodes, candidates, or metrics.
     episodes = []
-    for partition, hist_slice in (("train", histories[:500]),
-                                 ("validation", histories[500:550]),
-                                 ("test", histories[550:])):
+    for partition, offset, hist_slice in (("train", 0, histories[:500]),
+                                          ("validation", 500, histories[500:550])):
         for user_idx, hist in enumerate(hist_slice):
             if len(hist) < 6:
                 continue
-            # Generate 4 masks per user for evaluation dataset
-            for mask_idx in range(4):
-                user_rng = random.Random(f"{seed}:{partition}:{user_idx}:{mask_idx}")
-                seed_count = min(30, max(5, int(len(hist) * 0.5)))
-                shuffled = list(hist)
-                user_rng.shuffle(shuffled)
-                seed_indices = shuffled[:seed_count]
-                held_out = shuffled[seed_count:]
-                if not held_out:
-                    continue
-                pos_idx = held_out[0]
-                pos_track = tracks[pos_idx]
-                pos_pct = pos_track.get("popularityPercentile", 0.5)
-                band = min(9, max(0, int(pos_pct * 10)))
+            seed_counts = [count for count in (5, 20, 60) if len(hist) >= count + 1]
+            for seed_count in seed_counts:
+                for mask_idx in range(masks_per_bucket):
+                    user_rng = random.Random(f"{seed}:{partition}:{offset + user_idx}:{seed_count}:{mask_idx}")
+                    shuffled = list(hist)
+                    user_rng.shuffle(shuffled)
+                    seed_indices = shuffled[:seed_count]
+                    held_out = shuffled[seed_count:]
+                    if not held_out:
+                        continue
+                    pos_idx = held_out[0]
+                    pos_track = tracks[pos_idx]
+                    pos_pct = pos_track.get("popularityPercentile", 0.5)
+                    band = min(9, max(0, int(pos_pct * 10)))
 
-                # Choose an initial negative from the same band not in user history
-                user_set = set(hist)
-                same_band_pool = [i for i, t in enumerate(tracks)
-                                  if min(9, max(0, int(t.get("popularityPercentile", 0.5) * 10))) == band
-                                  and i not in user_set]
-                if not same_band_pool:
-                    same_band_pool = [i for i in range(len(tracks)) if i not in user_set]
-                neg_idx = same_band_pool[user_rng.randrange(len(same_band_pool))]
+                    user_set = set(hist)
+                    same_band_pool = [i for i in bands.get(band, []) if i not in user_set]
+                    if not same_band_pool:
+                        same_band_pool = [i for i in range(len(tracks)) if i not in user_set]
+                    neg_idx = same_band_pool[user_rng.randrange(len(same_band_pool))]
 
-                episodes.append({
-                    "partition": partition,
-                    "user_key": f"{partition}-u{user_idx}",
-                    "mask_index": mask_idx,
-                    "seed_ids": [tracks[i]["id"] for i in seed_indices],
-                    "positive_id": pos_track["id"],
-                    "positive_band": band,
-                    "negative_id": tracks[neg_idx]["id"],
-                    "negative_band": band,
-                    "negative_source": "retrieval",
-                    "user_history_ids": [tracks[i]["id"] for i in hist],
-                })
+                    episodes.append({
+                        "partition": partition,
+                        "user_key": f"{partition}-u{offset + user_idx}",
+                        "mask_index": seed_count * masks_per_bucket + mask_idx,
+                        "seed_ids": [tracks[i]["id"] for i in seed_indices],
+                        "positive_id": pos_track["id"],
+                        "positive_band": band,
+                        "negative_id": tracks[neg_idx]["id"],
+                        "negative_band": band,
+                        "negative_source": "retrieval",
+                        "user_history_ids": [tracks[i]["id"] for i in hist],
+                    })
 
     return {"tracks": tracks, "episodes": episodes}
 
@@ -117,6 +113,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=41)
+    parser.add_argument("--output", type=Path, default=Path("data/cache/tastelift/candidate-model.json"))
+    parser.add_argument("--checkpoint-dir", type=Path, default=Path("data/cache/tastelift/candidate-checkpoints"))
     args = parser.parse_args()
 
     catalog_path = Path("ml/tastelift-catalog.json")
@@ -131,16 +129,16 @@ def main():
     print("Building evaluation dataset...")
     dataset = build_evaluation_dataset(cat, seed=args.seed)
     tracks = dataset["tracks"]
-    test_episodes = [ep for ep in dataset["episodes"] if ep["partition"] == "test"]
-    print(f"Total tracks: {len(tracks)}, test episodes: {len(test_episodes)}")
+    validation_episodes = [ep for ep in dataset["episodes"] if ep["partition"] == "validation"]
+    print(f"Total tracks: {len(tracks)}, validation episodes: {len(validation_episodes)}")
 
-    print("\n--- Evaluating Old Model on Test Split ---")
+    print("\n--- Evaluating Old Model on Validation Split ---")
     old_model = TasteLift.from_export(old_model_path, tracks)
-    old_metrics = evaluate_model_on_test(old_model, test_episodes, tracks, seed=args.seed)
+    old_metrics = evaluate_model_on_test(old_model, validation_episodes, tracks, seed=args.seed)
     print(f"Old Model Recall@10: {old_metrics['recall_at_10']:.4f}, NDCG@10: {old_metrics['ndcg_at_10']:.4f}")
 
     print("\n--- Training New Model with Dynamic Hard Negatives ---")
-    ckpt_dir = Path("data/cache/tastelift/compare_checkpoints")
+    ckpt_dir = args.checkpoint_dir
     new_model = train_model(dataset, epochs=args.epochs, checkpoint_dir=ckpt_dir,
                             batch_size=args.batch_size, seed=args.seed, patience=5)
 
@@ -149,8 +147,8 @@ def main():
     new_model.load_state_dict(best_ckpt["model"])
     new_model.training_summary["selected_epoch"] = best_ckpt["epoch"]
 
-    print("\n--- Evaluating New Model on Test Split ---")
-    new_metrics = evaluate_model_on_test(new_model, test_episodes, tracks, seed=args.seed)
+    print("\n--- Evaluating New Model on Validation Split ---")
+    new_metrics = evaluate_model_on_test(new_model, validation_episodes, tracks, seed=args.seed)
     print(f"New Model Recall@10: {new_metrics['recall_at_10']:.4f}, NDCG@10: {new_metrics['ndcg_at_10']:.4f}")
 
     recall_diff = new_metrics["recall_at_10"] - old_metrics["recall_at_10"]
@@ -159,8 +157,8 @@ def main():
 
     if new_metrics["recall_at_10"] >= old_metrics["recall_at_10"] and new_metrics["ndcg_at_10"] >= old_metrics["ndcg_at_10"]:
         print("SUCCESS: New model quality did not drop!")
-        new_model.export_json("ml/tastelift-model.json")
-        print("Updated ml/tastelift-model.json with new model weights.")
+        new_model.export_json(args.output)
+        print(f"Exported accepted validation candidate to {args.output}.")
     else:
         print("NOTE: Quality dropped or was lower on this split; keeping original weights.")
 

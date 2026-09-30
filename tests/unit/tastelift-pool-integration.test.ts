@@ -2,6 +2,7 @@ import tasteLiftArtifact from "../../ml/tastelift-model.json";
 import { describe, expect, test } from "vitest";
 import { rankTasteCandidatePool, TasteLiftPoolInputError } from "../../src/lib/ranking";
 import { TasteLiftModel } from "../../src/lib/tastelift/model";
+import { buildTasteSlate } from "../../src/lib/tastelift/slate";
 import type { TasteCandidatePool } from "../../src/lib/tastelift/retrieval";
 
 const resolvedSeeds = [
@@ -71,5 +72,26 @@ describe("TasteCandidatePool ranking", () => {
     } catch (error) {
       expect((error as TasteLiftPoolInputError).failures).toEqual([unresolved]);
     }
+  });
+
+  test.each([5, 30, 100, 400, 500])("ranks and assembles forty safe tracks from %i inputs", (seedCount) => {
+    const seeds = Array.from({ length: seedCount }, (_, index) => ({
+      input: { artist: `Seed Artist ${index}`, title: `Seed ${index}` }, status: "resolved" as const,
+      source: "text" as const, diagnostic: { status: "retrieval_unavailable" as const, code: "no_exact_mbid" as const, message: "text fallback" },
+    }));
+    const candidates = Array.from({ length: 50 }, (_, index) => ({
+      mbid: `candidate-${index}`, artist: `Candidate Artist ${Math.floor(index / 2)}`, title: `Candidate ${index}`,
+      alternateMbids: [`candidate-${index}`], support: 1, retrievalScore: 1 / (index + 1),
+      evidence: [{ source: "tastelift-catalog" as const, seedIndex: index % seedCount, seedMbid: `text-${index % seedCount}`, recordingMbid: `candidate-${index}`, rank: index + 1, rawScore: 1 / (index + 1) }],
+    }));
+
+    const ranked = rankTasteCandidatePool({ seeds, candidates }, "rrf", model);
+    const slate = buildTasteSlate(ranked, 40);
+
+    expect(slate).toHaveLength(40);
+    expect(new Set(slate.map((track) => track.mbid)).size).toBe(40);
+    expect(slate.every((track) => !track.mbid.startsWith("seed-"))).toBe(true);
+    const artistCounts = slate.reduce<Record<string, number>>((counts, track) => ({ ...counts, [track.artist]: (counts[track.artist] ?? 0) + 1 }), {});
+    expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(2);
   });
 });

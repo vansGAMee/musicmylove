@@ -1,0 +1,83 @@
+{
+  "model": "CURRENT_BASELINE (human-graph-v1 heuristic)",
+  "partition": "test",
+  "evaluatedDate": "2026-09-22T19:59:43.939Z",
+  "catalogStats": {
+    "totalTracks": 45226,
+    "totalArtists": 16407,
+    "catalogByteSize": 39987030
+  },
+  "globalCoverageAcrossProtocols": {
+    "uniqueRecommendedTracks": 8716,
+    "catalogCoverageRatio": 0.19272100119400346,
+    "uniqueRecommendedArtists": 5154,
+    "artistCoverageRatio": 0.3141342110074968
+  },
+  "protocols": {
+    "1_to_rest": {
+      "numEvaluatedSessions": 106,
+      "recallAt10": 0.09874456957207446,
+      "recallAt40": 0.33831683005595287,
+      "mrrAt40": 0.86660720045154,
+      "ndcgAt10": 0.7771224870305927,
+      "ndcgAt40": 0.714970180779377,
+      "rPrecision": 0.6883929813175093,
+      "longTailRecallAt40": 0.3990124501584743,
+      "longTailNdcgAt40": 0.6795088521788164,
+      "avgLatencyMs": 14.058820443396232,
+      "avgCandidatePoolSize": 2047.7358490566037
+    },
+    "5_to_rest": {
+      "numEvaluatedSessions": 106,
+      "recallAt10": 0.13811594684613462,
+      "recallAt40": 0.41946409920747346,
+      "mrrAt40": 0.9783018867924529,
+      "ndcgAt10": 0.9564762199589287,
+      "ndcgAt40": 0.8537220855649461,
+      "rPrecision": 0.8096966525313674,
+      "longTailRecallAt40": 0.5095339769611562,
+      "longTailNdcgAt40": 0.8315998114504927,
+      "avgLatencyMs": 17.5776933773585,
+      "avgCandidatePoolSize": 2271.764150943396
+    },
+    "10_to_rest": {
+      "numEvaluatedSessions": 106,
+      "recallAt10": 0.154615055006323,
+      "recallAt40": 0.4401323749338393,
+      "mrrAt40": 1,
+      "ndcgAt10": 0.9738627302229309,
+      "ndcgAt40": 0.856475218785966,
+      "rPrecision": 0.804031895777179,
+      "longTailRecallAt40": 0.5266289979489569,
+      "longTailNdcgAt40": 0.8324134278188193,
+      "avgLatencyMs": 20.68771637735851,
+      "avgCandidatePoolSize": 2338.877358490566
+    },
+    "30_70": {
+      "numEvaluatedSessions": 106,
+      "recallAt10": 0.1818229188092965,
+      "recallAt40": 0.5000575342199612,
+      "mrrAt40": 0.9952830188679245,
+      "ndcgAt10": 0.9784092924530551,
+      "ndcgAt40": 0.8123501915154401,
+      "rPrecision": 0.7449236298292901,
+      "longTailRecallAt40": 0.6050886073961539,
+      "longTailNdcgAt40": 0.8085338861723917,
+      "avgLatencyMs": 39.85088687735843,
+      "avgCandidatePoolSize": 2389.3207547169814
+    },
+    "70_30": {
+      "numEvaluatedSessions": 106,
+      "recallAt10": 0.3779531019156486,
+      "recallAt40": 0.6133995239252515,
+      "mrrAt40": 0.9712264150943396,
+      "ndcgAt10": 0.9331143747310463,
+      "ndcgAt40": 0.7100355477804814,
+      "rPrecision": 0.6044367003804502,
+      "longTailRecallAt40": 0.7349761290587851,
+      "longTailNdcgAt40": 0.7920128568350706,
+      "avgLatencyMs": 67.57570183018865,
+      "avgCandidatePoolSize": 2531.6509433962265
+    }
+  }
+}

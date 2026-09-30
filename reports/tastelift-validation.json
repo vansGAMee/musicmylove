@@ -1,0 +1,83 @@
+{
+  "scope": "local anonymous-history validation proxy; user-disjoint 500 train / 50 validation / 121 untouched",
+  "examples": 145,
+  "hidden_favorites_per_example": 5,
+  "candidate_limits": [100, 500, 1000, 2000],
+  "before": {
+    "candidate_recall": {"100": 0.1282758621, "500": 0.1724137931, "1000": 0.2, "2000": 0.2372413793},
+    "oracle_recall_at_40": 0.1724137931,
+    "recall_at_40": 0.0937931034,
+    "ndcg_at_40": 0.0582879019,
+    "hit_rate_at_40": 0.324137931
+  },
+  "same_candidate_max_similarity_baseline": {
+    "recall_at_40": 0.1324137931,
+    "ndcg_at_40": 0.0793996648,
+    "hit_rate_at_40": 0.4344827586
+  },
+  "after": {
+    "candidate_recall": {"100": 0.1986206897, "500": 0.2910344828, "1000": 0.3117241379, "2000": 0.3393103448},
+    "oracle_recall_at_40": 0.3393103448,
+    "recall_at_40": 0.1682758621,
+    "ndcg_at_40": 0.0967874245,
+    "hit_rate_at_40": 0.5034482759
+  },
+  "seed_buckets": {
+    "5": {
+      "examples": 50,
+      "before_candidate_recall_at_500": 0.14,
+      "after_candidate_recall_at_2000": 0.24,
+      "before_recall_at_40": 0.076,
+      "after_recall_at_40": 0.12,
+      "before_ndcg_at_40": 0.0400761542,
+      "after_ndcg_at_40": 0.0534154383,
+      "before_hit_rate_at_40": 0.24,
+      "after_hit_rate_at_40": 0.42
+    },
+    "10-30": {
+      "examples": 50,
+      "before_candidate_recall_at_500": 0.176,
+      "after_candidate_recall_at_2000": 0.36,
+      "before_recall_at_40": 0.092,
+      "after_recall_at_40": 0.156,
+      "before_ndcg_at_40": 0.0436461382,
+      "after_ndcg_at_40": 0.0965738442,
+      "before_hit_rate_at_40": 0.34,
+      "after_hit_rate_at_40": 0.46
+    },
+    "31-100": {
+      "examples": 45,
+      "before_candidate_recall_at_500": 0.2044444444,
+      "after_candidate_recall_at_2000": 0.4266666667,
+      "before_recall_at_40": 0.1155555556,
+      "after_recall_at_40": 0.2355555556,
+      "before_ndcg_at_40": 0.0947918033,
+      "after_ndcg_at_40": 0.1452158315,
+      "before_hit_rate_at_40": 0.4,
+      "after_hit_rate_at_40": 0.6444444444
+    },
+    "101-250": {"examples": 0, "reason": "available local histories contain at most 100 tracks"},
+    "251-500": {"examples": 0, "reason": "available local histories contain at most 100 tracks"}
+  },
+  "trained_candidate": {
+    "architecture": "TasteLift target-aware top-8 BPR, dynamic hard negatives",
+    "train_pairs": 5928,
+    "validation_pairs": 588,
+    "best_epoch": 4,
+    "validation_pair_accuracy": 0.6989795918,
+    "candidate_recall_at_2000": 0.4151724138,
+    "recall_at_40": 0.1365517241,
+    "ndcg_at_40": 0.0691336575,
+    "hit_rate_at_40": 0.4620689655,
+    "decision": "rejected: ranking quality and 5-track bucket regressed versus retained production embeddings"
+  },
+  "serving_gate": {
+    "input_sizes": [5, 30, 100, 400, 500],
+    "result_count_each": 40,
+    "unique_recordings_each": 40,
+    "seed_tracks_returned": 0,
+    "maximum_tracks_per_artist": 2,
+    "wall_time_ms": {"5": 528, "30": 523, "100": 681, "400": 1576, "500": 2174}
+  },
+  "selection": "all architecture and model decisions use validation only; the final 121 histories were not evaluated"
+}

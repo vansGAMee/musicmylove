@@ -4,7 +4,7 @@ import { createTasteLiftSlate } from "../recommend";
 import type { RankedTrack } from "../types";
 import { expandTasteCandidatePool, type TasteLiftCatalogArtifact } from "./catalog";
 import { recordingIdentity } from "./identity";
-import { TasteLiftModel, type TasteLiftArtifact } from "./model";
+import { TasteLiftModel, type TasteLiftArtifact, type TasteLiftFeedback } from "./model";
 import { createTasteRetrievalAdapters, retrieveTasteCandidates, type TasteRetrievalAdapters } from "./retrieval";
 import type { ResolvedTasteSeed } from "./resolver";
 
@@ -19,12 +19,13 @@ export interface TasteLiftPipelineOptions {
   model?: TasteLiftModel;
   candidateLimit?: number;
   slateLimit?: number;
+  feedback?: readonly TasteLiftFeedback[];
 }
 
 /** Real application path: external evidence + train-only neural scan + rank + slate. */
 export async function recommendTasteSeeds(seeds: readonly ResolvedTasteSeed[], options: TasteLiftPipelineOptions = {}): Promise<TasteLiftPipelineResult> {
   const model = options.model ?? TasteLiftModel.fromArtifact(modelJson as TasteLiftArtifact);
-  const candidateLimit = options.candidateLimit ?? 500;
+  const candidateLimit = options.candidateLimit ?? 2_000;
   const external = await retrieveTasteCandidates(seeds, options.retrievalAdapters ?? createTasteRetrievalAdapters(), candidateLimit);
   const expanded = expandTasteCandidatePool(external, options.catalog ?? catalogJson as TasteLiftCatalogArtifact, model, candidateLimit);
 
@@ -51,7 +52,7 @@ export async function recommendTasteSeeds(seeds: readonly ResolvedTasteSeed[], o
     }),
   };
 
-  const rawSlate = createTasteLiftSlate(filteredExpanded, options.slateLimit ?? 40);
+  const rawSlate = createTasteLiftSlate(filteredExpanded, options.slateLimit ?? 40, options.feedback);
   const recommendations = rawSlate.filter((r) => !excludedMbids.has(r.mbid) && !excludedIdentities.has(recordingIdentity(r)));
 
   return { candidateCount: filteredExpanded.candidates.length, recommendations };

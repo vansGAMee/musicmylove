@@ -1,0 +1,21 @@
+{
+  "audit_version": "2026-09-23",
+  "personal_library_audit": {
+    "status": "not_present",
+    "message": "No personal listening history found on machine",
+    "fabricated_data_detected": false,
+    "description": "No local user library exists on this host; zero simulated, fake, or synthetic personal histories are generated or used."
+  },
+  "raw_audio_audit": {
+    "status": "not_present_locally",
+    "message": "Raw audio waveforms: not present locally; 65 Essentia/AcousticBrainz features used as acoustic auxiliary input; waveform AudioEncoder pending",
+    "features_used": "65-dim Essentia AcousticBrainz measurements (MFCCs, rhythm, key, timbre, danceability, spectral balance)",
+    "waveform_files_on_disk": 0,
+    "synthesized_audio": false
+  },
+  "data_provenance": {
+    "training_corpus": "Official ListenBrainz fullexport dump (chunked) + incremental dump + KEXP real broadcast history",
+    "user_split_integrity": "Strict user-level SHA256 partitioning (Train 80%, Val 10%, Test 10%) with zero user or session leakage between splits",
+    "pure_neural_ranking": "Candidate scores produced strictly by TasteLiftNet forward pass with client-side Personal Preference Adapter"
+  }
+}
